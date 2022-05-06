@@ -52,3 +52,12 @@ get_generation_dist <- function(gamma_mean = 4.8, gamma_sd = 2.3, maxGen = 10) {
   )
   return(probs)
 }
+
+get_discrete_lognormal <- function(meanlog, sdlog, maxX){
+  longest <- (1 - plnorm(maxX, meanlog = meanlog, sdlog = sdlog))
+  probs <- c(
+    longest,
+    sapply((maxX - 1):0, function(x) plnorm(x+1, meanlog = meanlog, sdlog = sdlog) - plnorm(x, meanlog = meanlog, sdlog = sdlog)) # all other (discrete)
+  )
+  return(probs)
+}
