@@ -2,6 +2,45 @@
 ##                  Stan data list preparation                   -
 ## ----------------------------------------------------------------
 
+get_inits <- function(stan_data_list, model_type) {
+  return(
+    function() {
+      inits <- list()
+
+      inits[["alpha_logit_start"]] <- rnorm(n = 1, mean = 0, sd = 2)
+      inits[["alpha_logit_raw"]] <- rep(rnorm(n = 1), stan_data_list[[T]])
+      inits[["alpha_logit_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
+
+      inits[["gamma"]] <- rnorm(n = stan_data_list$n_delays, mean = stan_data_list$gamma_mu, sd = stan_data_list$gamma_sd)
+      inits[["beta"]] <- rnorm(n = stan_data_list$n_beta, mean = stan_data_list$beta_mu, sd = stan_data_list$beta_sd)
+      inits[["eta"]] <- rnorm(n = stan_data_list$n_eta, mean = stan_data_list$eta_mu, sd = stan_data_list$eta_sd)
+
+      if (model_type == "base") {
+        inits[["lambda_log_start"]] <- rnorm(n = 1, mean = log(stan_data_list$expected_cases_start), sd = 0.2)
+        inits[["lambda_log_raw"]] <- rep(rnorm(1), stan_data_list[[T]])
+        inits[["lambda_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
+      } else if (model_type == "latent") {
+        # use initial expected cases as proxy for initial expected infections
+        inits[["iota_log_start"]] <- rnorm(n = 1, mean = log(stan_data_list$expected_cases_start), sd = 0.4)
+        inits[["iota_log_raw"]] <- rep(rnorm(1), stan_data_list[[T]])
+        inits[["iota_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
+      } else if (model_type == "renewal") {
+        # use initial expected cases as proxy for initial expected infections
+        inits[["R_log_start"]] <- rnorm(n = 1, mean = log(1), 2.2)
+        inits[["R_log_raw"]] <- rep(rnorm(1), stan_data_list[[T]])
+        inits[["R_log_sd"]] <- rhnorm(n = 1, sigma = 0.3) # half-normal
+
+        # use initial expected cases as proxy for infections / expected infections
+        inits[["iota_initial"]] <- rtnorm(n = stan_data_list$max_gen, mean = stan_data_list$expected_cases_start, sd = 0.5, a = 0)
+        I_length <- stan_data_list$max_gen + stan_data_list$L + stan_data_list$D + stan_data_list$T
+        inits[["I"]] <- rtnorm(n = I_length, mean = stan_data_list$expected_cases_start, sd = 0.6, a = 0)
+      }
+
+      return(inits)
+    }
+  )
+}
+
 prepare_data_list <- function(prep_data_complete,
                               prep_data_missing,
                               now,
@@ -16,6 +55,10 @@ prepare_data_list <- function(prep_data_complete,
   # --------------------------------------------
   # Reporting triangle
   reporting_matrices <- prepare_reporting_data(prep_data_complete, prep_data_missing, now, start_date, D)
+
+  # estimate initial expected cases based on reported known + unknown assuming a flat delay distribution
+  expected_cases_start <- sum(reporting_matrices[["reported_known"]][1, ]) +
+    mean(reporting_matrices[["reported_unknown"]][1:D])
 
   # --------------------------------------------
   # Delay resolution
@@ -126,6 +169,7 @@ prepare_data_list <- function(prep_data_complete,
     n_eta = length(wdays),
     reported_known = reporting_matrices[["reported_known"]],
     reported_unknown = reporting_matrices[["reported_unknown"]],
+    expected_cases_start = expected_cases_start,
     Z = Z,
     W = W,
     beta_mu = rep(0, length(ddChangepoint)),
@@ -152,6 +196,8 @@ prepare_data_list <- function(prep_data_complete,
     all_dates = all_dates,
     gamma_prior_kappa = gamma_prior_kappa
   )
+
+  additional_info[["inits"]] <- get_inits(stan_data_list, model_type)
 
   return(list(stan_data_list = stan_data_list, additional_info = additional_info))
 }
