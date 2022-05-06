@@ -222,7 +222,7 @@ plot_delay <- function(fit_summary, delay_truth = NULL, predLag = 1, time_window
     geom_ribbon(aes(ymin = .lower, ymax = .upper), fill = "#aa80ff", alpha = 0.6) +
     geom_line(color = "#9900cc") +
     {
-      if (!is.null(delay_truth)) geom_line(data = alpha_truth, aes(x = date, y = alpha), color = "black")
+      if (!is.null(delay_truth)) geom_line(data = delay_truth, aes(x = date, y = delay), color = "black")
     } +
     theme_bw() +
     ylab("Mean delay [days]") +

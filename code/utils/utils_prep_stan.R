@@ -61,10 +61,10 @@ prepare_data_list <- function(prep_data_complete,
   )
 
   # Replace holidays with sunday indicator
-  get_wdays <- function(nc_dates_t, D){
+  get_wdays <- function(nc_dates_t, D) {
     wdays <- lubridate::wday(nc_dates_t + 0:(D - 1), label = TRUE)
-    if(!is.null(holidays)){
-    wdays[(nc_dates_t + 0:(D - 1)) %in% holidays] <- "Sun"
+    if (!is.null(holidays)) {
+      wdays[(nc_dates_t + 0:(D - 1)) %in% holidays] <- "Sun"
     }
     return(wdays)
   }

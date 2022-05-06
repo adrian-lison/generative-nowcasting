@@ -120,6 +120,7 @@ summarize_mean_delay <- function(fit, start_date, now) {
   fit %>%
     spread_draws(p[d, date]) %>%
     group_by(.draw, date) %>%
+    mutate(d = d-1) %>% 
     summarize(mean_delay = weighted.mean(d, w = p), .groups = "drop") %>%
     group_by(date) %>%
     median_qi(.width = 0.95) %>%
