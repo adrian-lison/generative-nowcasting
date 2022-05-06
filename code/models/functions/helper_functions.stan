@@ -18,6 +18,13 @@ Helper functions
   }
   
   /**
+  * Cumulative product of 1-x for column vector
+  */
+  vector cumulative_prod1m_column(vector x) {
+    return exp(cumulative_sum(log1m(x)));
+  }
+  
+  /**
   * Cumulative product for row vector
   */
   row_vector cumulative_prod_row(row_vector x) {
@@ -25,13 +32,23 @@ Helper functions
   }
   
   /**
-  * Cumulative product for row vector
+  * Cumulative product of 1-x for row vector
   */
-  vector compute_prob_from_hazard(vector hazard, vector cum_converse_hazard) {
+  row_vector cumulative_prod1m_row(row_vector x) {
+    return exp(cumulative_sum(log1m(x)));
+  }
+  
+  /**
+  * Compute probabilities from hazards
+  */
+  vector compute_prob_from_hazard(vector hazard) {
     int n = num_elements(hazard);
     vector[n+1] prob;
+    vector[n] cum_converse_hazard;
+    cum_converse_hazard = cumulative_prod1m_column(hazard[1:n]);
     prob[1] = hazard[1];
     prob[2:n] = hazard[2:n] .* cum_converse_hazard[1:(n-1)];
     prob[n+1] = cum_converse_hazard[n];
     return(prob);
   }
+  
