@@ -16,10 +16,12 @@ data {
 
 parameters {
   // random walk parameters for lambda
+  real lambda_log_start;
   vector[D+T] lambda_log_raw; // nuisance parameter for non-centered parameterization
   real<lower=0> lambda_log_sd;
   
   // random walk parameters for alpha
+  real alpha_logit_start;
   vector[T] alpha_logit_raw; // nuisance parameter for non-centered parameterization
   real<lower=0> alpha_logit_sd;
   
@@ -45,11 +47,11 @@ transformed parameters {
   
   // occurrence process
   // AR(1) process on log scale
-  lambda = exp(ar1_process_noncentered_vec(0,lambda_log_raw,lambda_log_sd));
+  lambda = exp(ar1_process_noncentered_vec(lambda_log_start,lambda_log_raw,lambda_log_sd));
   
   // share of events with known occurrence date process
   // AR(1) process on logit scale
-  alpha = inv_logit(ar1_process_noncentered_vec(0,alpha_logit_raw,alpha_logit_sd));
+  alpha = inv_logit(ar1_process_noncentered_vec(alpha_logit_start,alpha_logit_raw,alpha_logit_sd));
   
   // reporting delay model: hazards and probabilities
   {
@@ -69,14 +71,14 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log(lambda)
-  lambda_log_raw[1] ~ normal(0,12); // starting prior for AR
-  lambda_log_raw[2:(D+T)] ~ normal(0,1); // non-centered
   lambda_log_sd ~ normal(0,0.5) T[0, ]; // truncated normal
+  lambda_log_start ~ normal(0,12); // starting prior for AR
+  lambda_log_raw[1:(D+T)] ~ normal(0,1); // non-centered
 
   // random walk prior for share of events with known occurrence date
-  alpha_logit_raw[1] ~ normal(0,2); // starting prior
-  alpha_logit_raw[2:T] ~ normal(0,1); // non-centered
   alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
+  alpha_logit_start ~ normal(0,2); // starting prior
+  alpha_logit_raw[1:T] ~ normal(0,1); // non-centered
 
   // Likelihood
   {

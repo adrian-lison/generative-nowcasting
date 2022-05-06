@@ -19,10 +19,12 @@ data {
 
 parameters {
   // random walk parameters for lambda
+  real iota_log_start;
   vector[T+L+D] iota_log_raw; // nuisance parameter for non-centered parameterization
   real<lower=0> iota_log_sd;
   
   // random walk parameters for alpha
+  real alpha_logit_start;
   vector[T] alpha_logit_raw; // nuisance parameter for non-centered parameterization
   real<lower=0> alpha_logit_sd;
   
@@ -51,7 +53,7 @@ transformed parameters {
   
   // latent event process
   // AR(1) process on log scale
-  iota = exp(ar1_process_noncentered_vec(0,iota_log_raw,iota_log_sd));
+  iota = exp(ar1_process_noncentered_vec(iota_log_start,iota_log_raw,iota_log_sd));
   
   // occurrence process (convolution)
   for(t in 1:(D+T)) {
@@ -60,7 +62,7 @@ transformed parameters {
   
   // share of events with known occurrence date process
   // AR(1) process on logit scale
-  alpha = inv_logit(ar1_process_noncentered_vec(0,alpha_logit_raw,alpha_logit_sd));
+  alpha = inv_logit(ar1_process_noncentered_vec(alpha_logit_start,alpha_logit_raw,alpha_logit_sd));
   
   // reporting delay model: hazards and probabilities
   {
@@ -79,14 +81,14 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log latent events (iota_log)
-  iota_log_raw[1] ~ normal(0,12); // starting prior for AR
-  iota_log_raw[2:L+D+T] ~ normal(0,1); // non-centered
   iota_log_sd ~ normal(0,0.5) T[0, ]; // truncated normal
+  iota_log_start ~ normal(0,12); // starting prior for AR
+  iota_log_raw[1:L+D+T] ~ normal(0,1); // non-centered
   
   // random walk prior for share of events with known occurrence date
-  alpha_logit_raw[1] ~ normal(0,2); // starting prior
-  alpha_logit_raw[2:T] ~ normal(0,1); // non-centered
   alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
+  alpha_logit_start ~ normal(0,2); // starting prior
+  alpha_logit_raw[1:T] ~ normal(0,1); // non-centered
 
   // Likelihood
   {

@@ -29,10 +29,12 @@ data {
 
 parameters {
   // random walk parameters for lambda
+  real R_log_start;
   vector[T+L+D] R_log_raw; // nuisance parameter for non-centered parameterization
   real<lower=0> R_log_sd;
   
   // random walk parameters for alpha
+  real alpha_logit_start;
   vector[T] alpha_logit_raw; // nuisance parameter for non-centered parameterization
   real<lower=0> alpha_logit_sd;
   
@@ -70,7 +72,7 @@ transformed parameters {
   
   // Smoothing prior for R
   // AR(1) process on log scale, starting value 1 on unit scale
-  R = exp(ar1_process_noncentered_vec(log(1),R_log_raw,R_log_sd));
+  R = exp(ar1_process_noncentered_vec(R_log_start,R_log_raw,R_log_sd));
   
   // latent event process (convolution) / renewal equation
   for(t in 1:(L+D+T)) {
@@ -84,7 +86,7 @@ transformed parameters {
   
   // share of events with known occurrence date process
   // AR(1) process on logit scale
-  alpha = inv_logit(ar1_process_noncentered_vec(0,alpha_logit_raw,alpha_logit_sd));
+  alpha = inv_logit(ar1_process_noncentered_vec(alpha_logit_start,alpha_logit_raw,alpha_logit_sd));
   
   // reporting delay model: hazards and probabilities
   {
@@ -103,9 +105,9 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log latent events (iota_log)
-  R_log_raw[1] ~ normal(0,2.2); // starting prior for AR
-  R_log_raw[2:L+D+T] ~ normal(0,1); // non-centered
   R_log_sd ~ normal(0,0.3) T[0, ]; // truncated normal
+  R_log_start ~ normal(log(1),log(5)); // starting prior for AR
+  R_log_raw[1:L+D+T] ~ normal(0,1); // non-centered
   
   // latent event realizations
   iota_initial ~ normal(iota_initial_mean,iota_initial_sd); // half normal due to constraint
@@ -113,9 +115,9 @@ model {
   I[(max_gen+1):(max_gen+L+D+T)] ~ normal(iota,sqrt(iota)); // half normal due to constraint
   
   // random walk prior for share of events with known occurrence date
-  alpha_logit_raw[1] ~ normal(0,2); // starting prior
-  alpha_logit_raw[2:T] ~ normal(0,1); // non-centered
   alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
+  alpha_logit_start ~ normal(0,2); // starting prior
+  alpha_logit_raw[1:T] ~ normal(0,1); // non-centered
 
   // Likelihood
   {
