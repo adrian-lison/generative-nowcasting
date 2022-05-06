@@ -79,14 +79,14 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log latent events (iota_log)
-  iota_log_sd ~ normal(0,0.5); // half normal due to constraint
   iota_log_raw[1] ~ normal(0,12); // starting prior for AR
   iota_log_raw[2:L+D+T] ~ normal(0,1); // non-centered
+  iota_log_sd ~ normal(0,0.5) T[0, ]; // truncated normal
   
   // random walk prior for share of events with known occurrence date
-  alpha_logit_sd ~ normal(0,0.5); // half-normal due to constraint
   alpha_logit_raw[1] ~ normal(0,2); // starting prior
   alpha_logit_raw[2:T] ~ normal(0,1); // non-centered
+  alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
 
   // Likelihood
   {

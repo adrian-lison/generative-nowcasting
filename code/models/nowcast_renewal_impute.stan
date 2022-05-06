@@ -103,9 +103,9 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log latent events (iota_log)
-  R_log_sd ~ normal(0,0.3); // half normal due to constraint
   R_log_raw[1] ~ normal(0,2.2); // starting prior for AR
   R_log_raw[2:L+D+T] ~ normal(0,1); // non-centered
+  R_log_sd ~ normal(0,0.3) T[0, ]; // truncated normal
   
   // latent event realizations
   iota_initial ~ normal(iota_initial_mean,iota_initial_sd); // half normal due to constraint
@@ -113,9 +113,9 @@ model {
   I[(max_gen+1):(max_gen+L+D+T)] ~ normal(iota,sqrt(iota)); // half normal due to constraint
   
   // random walk prior for share of events with known occurrence date
-  alpha_logit_sd ~ normal(0,0.5); // half-normal due to constraint
   alpha_logit_raw[1] ~ normal(0,2); // starting prior
   alpha_logit_raw[2:T] ~ normal(0,1); // non-centered
+  alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
 
   // Likelihood
   {
