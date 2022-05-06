@@ -6,7 +6,7 @@ prepare_data_list <- function(prep_data_complete,
                               prep_data_missing,
                               now,
                               start_date,
-                              holidays,
+                              holidays = NULL,
                               D = 21,
                               delay_resolution = NULL,
                               model_type = "base",
@@ -61,15 +61,19 @@ prepare_data_list <- function(prep_data_complete,
   )
 
   # Replace holidays with sunday indicator
-  adjust_day <- function(nc_dates_t, D) {
-    if_else((nc_dates_t + 0:(D - 1)) %in% holidays, ymd("2021-01-03"), nc_dates_t + 0:(D - 1)) # 2021-01-03 is an arbitrary Sunday
+  get_wdays <- function(nc_dates_t, D){
+    wdays <- lubridate::wday(nc_dates_t + 0:(D - 1), label = TRUE)
+    if(!is.null(holidays)){
+    wdays[(nc_dates_t + 0:(D - 1)) %in% holidays] <- "Sun"
+    }
+    return(wdays)
   }
 
   # Loop over all times and lags
   for (t in seq_len(length(tswp))) {
     for (w in seq_len(length(wdays))) {
       #
-      W[t, , w] <- as.numeric(lubridate::wday(adjust_day(tswp[t], D), label = TRUE) == wdays[w])
+      W[t, , w] <- as.numeric(get_wdays(tswp[t], D) == wdays[w])
     }
   }
 
