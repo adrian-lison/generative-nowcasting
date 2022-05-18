@@ -27,10 +27,13 @@ get_inits <- function(stan_data_list, model_type) {
         inits[["iota_log_raw"]] <- rnorm(n = stan_data_list[[T]])
         inits[["iota_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
       } else if (model_type == "renewal") {
-        # use initial expected cases as proxy for initial expected infections
-        inits[["R_log_start"]] <- rnorm(n = 1, mean = log(1), 2.2)
-        inits[["R_log_raw"]] <- rep(rnorm(1), stan_data_list[[T]])
-        inits[["R_log_sd"]] <- rhnorm(n = 1, sigma = 0.3) # half-normal
+        inits[["R_ets_alpha"]] <- rbeta(n = 1, 4, 4)
+        inits[["R_ets_beta"]] <- rbeta(n = 1, 4, 4)
+        inits[["R_ets_phi"]] <- rbeta(n = 1, 50, 5)
+        inits[["R_level_start"]] <- rnorm(n = 1, mean = log(1), 0.8)
+        inits[["R_trend_start"]] <- rnorm(n = 1, mean = 0, 0.2)
+        inits[["R_raw"]] <- rnorm(n = stan_data_list[[T]])
+        inits[["R_sd"]] <- rhnorm(n = 1, sigma = 0.3) # half-normal
 
         # use initial expected cases as proxy for infections / expected infections
         inits[["iota_initial"]] <- rtnorm(n = stan_data_list$max_gen, mean = stan_data_list$expected_cases_start, sd = 0.5, a = 0)

@@ -13,7 +13,7 @@ data {
   // include reporting delay data and prior information
   #include data/reporting_delay.stan
   
-  // include latent delay data and prior information
+  // include latent delay data
   #include data/latent_delay.stan
   
   // maximum generation time
@@ -23,17 +23,35 @@ data {
   // reversed, such that the probability for a delay of one comes last (zero excluded)
   vector<lower=0>[max_gen] generation_time_dist;
   
-  real<lower=0> iota_initial_mean[max_gen];
-  real<lower=0> iota_initial_sd[max_gen];
+  real<lower=0> R_ets_alpha_prior_alpha;
+  real<lower=0> R_ets_alpha_prior_beta;
+  real<lower=0> R_ets_beta_prior_alpha;
+  real<lower=0> R_ets_beta_prior_beta;
+  real<lower=0> R_ets_phi_prior_alpha;
+  real<lower=0> R_ets_phi_prior_beta;
+  real R_sd_prior_mu;
+  real<lower=0> R_sd_prior_sd;
+  real R_level_start_prior_mu;
+  real<lower=0> R_level_start_prior_sd;
+  real R_trend_start_prior_mu;
+  real<lower=0> R_trend_start_prior_sd;
+  
+  real<lower=0> iota_initial_prior_mu[max_gen];
+  real<lower=0> iota_initial_prior_sd[max_gen];
+  
   real xi_negbinom_prior_mu;
   real<lower=0> xi_negbinom_prior_sd;
 }
 
 parameters {
-  // random walk parameters for lambda
-  real R_log_start;
-  vector[T+L+D] R_log_raw; // nuisance parameter for non-centered parameterization
-  real<lower=0> R_log_sd;
+  // exponential smoothing / innovations state space process for log(R)
+  real<lower=0,upper=1> R_ets_alpha; // smoothing parameter for the level
+  real<lower=0,upper=1> R_ets_beta; // smoothing parameter for the trend
+  real<lower=0,upper=1> R_ets_phi; // dampening parameter of the trend
+  real R_level_start; // starting value of the level
+  real R_trend_start; // starting value of the trend
+  vector[T+L+D] R_raw; // standardized additive errors
+  real<lower=0> R_sd; // standard deviation of additive errors
   
   // random walk parameters for alpha
   real alpha_logit_start;
@@ -73,8 +91,8 @@ transformed parameters {
   real phi_negbinom = inv_square(xi_negbinom);
   
   // Smoothing prior for R
-  // AR(1) process on log scale, starting value 1 on unit scale
-  R = exp(ar1_process_noncentered_vec(R_log_start,R_log_raw,R_log_sd));
+  // ETS/Innovations state space process on log scale, starting value 1 on unit scale
+  R = softplus(holt_damped_process_noncentered(R_ets_alpha,R_ets_beta,R_ets_phi,R_level_start,R_trend_start,R_raw,R_sd),4);
   
   // latent event process (convolution) / renewal equation
   for(t in 1:(L+D+T)) {
@@ -106,10 +124,14 @@ model {
   // in Günther et al. 2021, this was either improper,
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
-  // random walk prior for log latent events (iota_log)
-  R_log_sd ~ normal(0,0.3) T[0, ]; // truncated normal
-  R_log_start ~ normal(log(1),log(5)); // starting prior for AR
-  R_log_raw[1:L+D+T] ~ normal(0,1); // non-centered
+  // ETS/Innovations state space process prior for log R
+  R_ets_alpha ~ beta(R_ets_alpha_prior_alpha,R_ets_alpha_prior_beta); 
+  R_ets_beta ~ beta(R_ets_beta_prior_alpha,R_ets_beta_prior_beta); 
+  R_ets_phi ~ beta(R_ets_phi_prior_alpha,R_ets_phi_prior_beta); // dampening needs a tight prior, roughly between 0.8 and 0.98
+  R_sd ~ normal(R_sd_prior_mu,R_sd_prior_sd) T[0, ]; // truncated normal
+  R_level_start ~ normal(R_level_start_prior_mu,R_level_start_prior_sd); // starting prior for level
+  R_trend_start ~ normal(R_trend_start_prior_mu,R_trend_start_prior_sd); // starting prior for trend
+  R_raw[1:L+D+T] ~ std_normal(); // non-centered
   
   // latent event realizations
   iota_initial ~ normal(iota_initial_prior_mu,iota_initial_prior_sd); // half normal due to constraint

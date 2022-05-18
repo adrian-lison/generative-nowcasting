@@ -65,7 +65,7 @@ summarize_fit <- function(fitted_model,
       select(-c(.width, .point, .interval))
   } else if (model_type == "renewal") {
     fit_summary[["other"]] <- fitted_model %>%
-      gather_draws(alpha_logit_sd, R_log_sd) %>%
+      gather_draws(alpha_logit_sd, R_sd) %>%
       median_qi(.width = 0.95) %>%
       select(-c(.width, .point, .interval))
   } else {

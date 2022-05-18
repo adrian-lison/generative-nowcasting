@@ -11,6 +11,31 @@ Helper functions
   }
   
   /**
+  * Damped Holt's method as an innovation state space model, non-centered parameterization
+  */
+  vector holt_damped_process_noncentered(real alpha, real beta, real phi, real l_start, real b_start, vector noise_standardized, real noise_sd){
+    int n = num_elements(noise_standardized);
+    vector[n] b;
+    vector[n] l;
+    vector[n] y;
+    real epsilon;
+    
+    epsilon = noise_standardized[1] * noise_sd;
+    b[1] = phi * b_start + beta * epsilon;
+    l[1] = l_start + phi * b_start + alpha * epsilon;
+    y[1] = l_start + phi * b_start + epsilon;
+    
+    for(t in 2:n){
+      epsilon = noise_standardized[t] * noise_sd;
+      b[t] = phi * b[t-1] + beta * epsilon;
+      l[t] = l[t-1] + phi * b[t-1] + alpha * epsilon;
+      y[t] = l[t-1] + phi * b[t-1] + epsilon;
+    }
+    
+    return(y);
+  }
+  
+  /**
   * Cumulative product for column vector
   */
   vector cumulative_prod_column(vector x) {
@@ -52,3 +77,6 @@ Helper functions
     return(prob);
   }
   
+  vector softplus(vector x, real k) {
+    return(log1p_exp(k * x) / k);
+  }
