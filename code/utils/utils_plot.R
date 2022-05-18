@@ -30,7 +30,7 @@ plot_nowcast_observed <- function(fit_summary, cases_truth = NULL, reported_case
       if (!is.null(reported_cases)) geom_bar(data = reported_cases %>% filter(event1_date > mindate, event1_date < now), aes(x = event1_date, y = n), stat = "identity", color = NA, fill = "grey")
     } +
     {
-      if (!is.null(cases_truth)) geom_line(data = cases_truth %>% filter(date > mindate, date < now), aes(y = cases), color = "black")
+      if (!is.null(cases_truth)) geom_line(data = cases_truth %>% filter(date > mindate, date < now), aes(y = cases), color = "red")
     } +
     geom_ribbon(aes(ymin = nowcast_known.lower, ymax = nowcast_known.upper), fill = "#b3d1ff", alpha = 0.6) +
     geom_line(color = "#0066ff") +
@@ -67,6 +67,12 @@ plot_nowcast_all <- function(fit_summary, cases_truth = NULL, infections_truth =
     } +
     scale_fill_manual(values = c("NA", "grey")) +
     {
+      if (show_infections & !is.null(infections_truth)) geom_line(data = infections_truth %>% filter(date > mindate, date <= maxdate - fit_summary[["median_incubation"]]), aes(y = infections), color = "red")
+    } +
+    {
+      if (!is.null(cases_truth)) geom_line(data = cases_truth %>% filter(date > mindate, date <= maxdate), aes(y = cases), color = "red")
+    } +
+    {
       if (show_infections & "latent" %in% names(fit_summary)) geom_ribbon(data = fit_summary[["latent"]] %>% filter(date > mindate, date <= maxdate - fit_summary[["median_incubation"]]), aes(ymin = .lower, ymax = .upper, y = iota), fill = "#ffbf80", alpha = 0.3)
     } +
     {
@@ -74,12 +80,6 @@ plot_nowcast_all <- function(fit_summary, cases_truth = NULL, infections_truth =
     } +
     geom_ribbon(aes(ymin = nowcast_all.lower, ymax = nowcast_all.upper), fill = "#b3d1ff", alpha = 0.6) +
     geom_line(color = "#0066ff") +
-    {
-      if (show_infections & !is.null(infections_truth)) geom_line(data = infections_truth %>% filter(date > mindate, date <= maxdate - fit_summary[["median_incubation"]]), aes(y = infections), color = "red")
-    } +
-    {
-      if (!is.null(cases_truth)) geom_line(data = cases_truth %>% filter(date > mindate, date <= maxdate - fit_summary[["median_incubation"]]), aes(y = cases), color = "black")
-    } +
     theme_bw() +
     ylab(event2_axislabel) +
     xlab(event1_axislabel) +
@@ -110,11 +110,11 @@ plot_infections <- function(fit_summary, infections_truth = NULL, predLag = 1, t
       if (show_weekends) geom_tile(data = .getWeekends(mindate, maxdate), aes(y = 0, height = Inf, fill = is_weekend), alpha = .3)
     } +
     scale_fill_manual(values = c("NA", "grey")) +
-    geom_ribbon(aes(ymin = .lower, ymax = .upper, y = iota), fill = "#ffbf80", alpha = 0.3) +
-    geom_line(color = "orange", linetype = "dashed") +
     {
       if (!is.null(infections_truth)) geom_line(data = infections_truth %>% filter(date > mindate, date <= maxdate - fit_summary[["median_incubation"]]), aes(y = infections), color = "red")
     } +
+    geom_ribbon(aes(ymin = .lower, ymax = .upper, y = iota), fill = "#ffbf80", alpha = 0.3) +
+    geom_line(color = "orange", linetype = "dashed") +
     theme_bw() +
     ylab(event2_axislabel) +
     xlab(event1_axislabel) +
@@ -130,7 +130,7 @@ plot_infections <- function(fit_summary, infections_truth = NULL, predLag = 1, t
 plot_R <- function(fit_summary, R_truth = NULL, predLag = 1, time_window = 28, breaks_resolution = NULL, show_weekends = T, event1_axislabel = "Date") {
   now <- fit_summary[["now"]]
   mindate <- now - time_window # e.g. time_window=28 to show the last four weeks
-  maxdate <- now - predLag - fit_summary[["median_incubation"]]
+  maxdate <- now - predLag
 
   max_R <- fit_summary[["R"]] %>%
     filter(date > mindate, date <= maxdate) %>%
@@ -139,18 +139,18 @@ plot_R <- function(fit_summary, R_truth = NULL, predLag = 1, time_window = 28, b
 
   plot <- fit_summary[["R"]] %>%
     mutate(is_weekend = lubridate::wday(date, label = TRUE) %in% c("Sat", "Sun")) %>%
-    filter(date > mindate, date <= maxdate) %>%
+    filter(date > mindate, date <= maxdate - fit_summary[["median_incubation"]]) %>%
     ggplot(aes(x = date, y = R)) +
     {
       if (show_weekends) geom_tile(data = .getWeekends(mindate, maxdate), aes(y = 0, height = Inf, fill = is_weekend), alpha = .3)
     } +
     scale_fill_manual(values = c("NA", "grey")) +
     geom_hline(yintercept = 1, linetype = "dashed") +
+    {
+      if (!is.null(R_truth)) geom_line(data = R_truth, aes(x = date, y = R), color = "red")
+    } +
     geom_ribbon(aes(ymin = .lower, ymax = .upper), fill = "#79d279", alpha = 0.6) +
     geom_line(color = "#006600") +
-    {
-      if (!is.null(R_truth)) geom_line(data = R_truth, aes(x = date, y = R), color = "black")
-    } +
     theme_bw() +
     ylab("R") +
     xlab(event1_axislabel) +
@@ -183,7 +183,7 @@ plot_alpha <- function(fit_summary, alpha_truth = NULL, predLag = 1, time_window
     geom_ribbon(aes(ymin = .lower, ymax = .upper), fill = "#ffccff", alpha = 0.6) +
     geom_line(color = "#ff66ff") +
     {
-      if (!is.null(alpha_truth)) geom_line(data = alpha_truth, aes(x = date, y = alpha), color = "black")
+      if (!is.null(alpha_truth)) geom_line(data = alpha_truth, aes(x = date, y = alpha), color = "red")
     } +
     theme_bw() +
     ylab("Known fraction") +
@@ -222,7 +222,7 @@ plot_delay <- function(fit_summary, delay_truth = NULL, predLag = 1, time_window
     geom_ribbon(aes(ymin = .lower, ymax = .upper), fill = "#aa80ff", alpha = 0.6) +
     geom_line(color = "#9900cc") +
     {
-      if (!is.null(delay_truth)) geom_line(data = delay_truth, aes(x = date, y = delay), color = "black")
+      if (!is.null(delay_truth)) geom_line(data = delay_truth, aes(x = date, y = delay), color = "red")
     } +
     theme_bw() +
     ylab("Mean delay [days]") +
