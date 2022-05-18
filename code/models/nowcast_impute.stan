@@ -12,6 +12,13 @@ data {
   
   // include reporting delay data and prior information
   #include data/reporting_delay.stan
+  
+  real lambda_log_sd_prior_mu;
+  real<lower=0> lambda_log_sd_prior_sd;
+  
+  real lambda_log_start_prior_mu;
+  real<lower=0> lambda_log_start_prior_sd;
+  
   real xi_negbinom_prior_mu;
   real<lower=0> xi_negbinom_prior_sd;
 }
@@ -73,10 +80,9 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log(lambda)
-  lambda_log_sd ~ normal(0,0.5) T[0, ]; // truncated normal
-  lambda_log_start ~ normal(0,12); // starting prior for AR
-  lambda_log_raw[1:(D+T)] ~ normal(0,1); // non-centered
-
+  lambda_log_sd ~ normal(lambda_log_sd_prior_mu,lambda_log_sd_prior_sd) T[0, ]; // truncated normal
+  lambda_log_start ~ normal(lambda_log_start_prior_mu,lambda_log_start_prior_sd); // starting prior for AR
+  lambda_log_raw[1:(D+T)] ~ std_normal(); // non-centered
 
   // Likelihood
   {

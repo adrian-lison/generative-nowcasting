@@ -112,10 +112,9 @@ model {
   R_log_raw[1:L+D+T] ~ normal(0,1); // non-centered
   
   // latent event realizations
-  iota_initial ~ normal(iota_initial_mean,iota_initial_sd); // half normal due to constraint
-  I[1:max_gen] ~ normal(iota_initial,sqrt(iota_initial)); // half normal due to constraint
-  I[(max_gen+1):(max_gen+L+D+T)] ~ normal(iota,sqrt(iota)); // half normal due to constraint
-  
+  iota_initial ~ normal(iota_initial_prior_mu,iota_initial_prior_sd); // half normal due to constraint
+  I[1:max_gen] ~ normal(iota_initial,sqrt(iota_initial)); // half normal due to constraint, approximates Poisson
+  I[(max_gen+1):(max_gen+L+D+T)] ~ normal(iota,sqrt(iota)); // half normal due to constraint, approximates Poisson
 
   // Likelihood
   {

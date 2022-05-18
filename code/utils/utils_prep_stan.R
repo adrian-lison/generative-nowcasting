@@ -11,18 +11,20 @@ get_inits <- function(stan_data_list, model_type) {
       inits[["alpha_logit_raw"]] <- rep(rnorm(n = 1), stan_data_list[[T]])
       inits[["alpha_logit_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
 
-      inits[["gamma"]] <- rnorm(n = stan_data_list$n_delays, mean = stan_data_list$gamma_mu, sd = stan_data_list$gamma_sd)
-      inits[["beta"]] <- rnorm(n = stan_data_list$n_beta, mean = stan_data_list$beta_mu, sd = stan_data_list$beta_sd)
-      inits[["eta"]] <- rnorm(n = stan_data_list$n_eta, mean = stan_data_list$eta_mu, sd = stan_data_list$eta_sd)
+      inits[["gamma"]] <- rnorm(n = stan_data_list$n_delays, mean = stan_data_list$gamma_prior_mu, sd = stan_data_list$gamma_prior_sd)
+      inits[["beta"]] <- rnorm(n = stan_data_list$n_beta, mean = stan_data_list$beta_prior_mu, sd = stan_data_list$beta_prior_sd)
+      inits[["eta"]] <- rnorm(n = stan_data_list$n_eta, mean = stan_data_list$eta_prior_mu, sd = stan_data_list$eta_prior_sd)
 
+      inits[["xi_negbinom"]] <- rnorm(n = 1, mean = stan_data_list$xi_negbinom_prior_mu, sd = stan_data_list$xi_negbinom_prior_sd)
+      
       if (model_type == "base") {
         inits[["lambda_log_start"]] <- rnorm(n = 1, mean = log(stan_data_list$expected_cases_start), sd = 0.2)
-        inits[["lambda_log_raw"]] <- rep(rnorm(1), stan_data_list[[T]])
+        inits[["lambda_log_raw"]] <- rnorm(n = stan_data_list[[T]])
         inits[["lambda_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
       } else if (model_type == "latent") {
         # use initial expected cases as proxy for initial expected infections
         inits[["iota_log_start"]] <- rnorm(n = 1, mean = log(stan_data_list$expected_cases_start), sd = 0.4)
-        inits[["iota_log_raw"]] <- rep(rnorm(1), stan_data_list[[T]])
+        inits[["iota_log_raw"]] <- rnorm(n = stan_data_list[[T]])
         inits[["iota_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
       } else if (model_type == "renewal") {
         # use initial expected cases as proxy for initial expected infections
@@ -41,16 +43,89 @@ get_inits <- function(stan_data_list, model_type) {
   )
 }
 
+get_prior <- function(variable, ...){
+  prior_list <- list()
+  prior_values <- list(...)
+  for(v in names(prior_values)){
+    prior_list[[paste0(variable,"_prior_",v)]] <- prior_values[[v]]
+  }
+  return(prior_list)
+}
+
+define_priors <- function(model_def,
+                          dirichlet_kappa = 1,
+                          gamma_prior_precomputed_dir = here::here("code", "models", "priors_precomputed")) {
+  prior_def <- list()
+  prior_def[["dirichlet_kappa"]] <- dirichlet_kappa
+  
+  # Check if precomputed gamma (baseline reporting hazard) prior exists
+  if (!dir.exists(gamma_prior_precomputed_dir)) dir.create(gamma_prior_precomputed_dir)
+  gamma_prior_filepath <- here::here(gamma_prior_precomputed_dir, paste0("gamma_prior_k", dirichlet_kappa, "_D", model_def$D, ".rds"))
+  prior_def[["gamma_prior_precomputed_path"]] <- gamma_prior_filepath
+  if (file.exists(gamma_prior_filepath)) {
+    gamma_prior_kappa <- readRDS(gamma_prior_filepath)
+    stopifnot(nrow(gamma_prior_kappa) == model_def$D)
+  } else {
+    # precompute prior
+    gamma_prior_kappa <- get_prior_gamma(gd.prior.kappa = dirichlet_kappa, D = D)
+  }
+  prior_def[["gamma_prior_kappa"]] <- gamma_prior_kappa
+  
+  gamma_prior_kappa_df <- data.frame(
+    gamma_idx = model_def$delay_idx[1:(length(model_def$delay_idx) - 2)],
+    gamma_mu = gamma_prior_kappa$gamma_mu,
+    sigma_gamma = gamma_prior_kappa$sigma_gamma
+  ) %>%
+    group_by(gamma_idx) %>%
+    summarize(across(everything(), mean), .groups = "drop")
+  
+  prior_def[["get_priors"]] <- function(stan_data_list){
+    priors <- list()
+    
+    priors[["alpha_logit_sd"]] = get_prior("alpha_logit_sd", mu = 0, sd = 0.5)
+    priors[["alpha_logit_start"]] = get_prior("alpha_logit_start", mu = 0, sd = 2)
+    priors[["beta"]] = get_prior("beta", mu = rep(0, stan_data_list$n_beta), sd = c(rep(0.01, stan_data_list$n_beta)))
+    priors[["eta"]] = get_prior("eta", mu = rep(0, stan_data_list$n_eta), sd = c(rep(0.5, stan_data_list$n_eta)))
+    priors[["gamma"]] = get_prior("gamma", mu = gamma_prior_kappa_df$gamma_mu, sd = gamma_prior_kappa_df$sigma_gamma)
+    
+    priors[["xi_negbinom"]] = get_prior("xi_negbinom", mu = 0, sd = 1)
+    
+    if (model_def$model_type == "base") {
+      priors[["lambda_log_sd"]] <- get_prior("lambda_log_sd", mu = 0, sd = 0.5)
+      priors[["lambda_log_start"]] <- get_prior("lambda_log_start", mu = 0, sd = 12)
+    }
+    
+    if (model_def$model_type == "latent") {
+      priors[["iota_log_sd"]] <- get_prior("iota_log_sd", mu = 0, sd = 0.5)
+      priors[["iota_log_start"]] <- get_prior("iota_log_start", mu = 0, sd = 12)
+    }
+    
+    if (model_def$model_type == "renewal") {
+      priors[["R_ets_alpha"]] <- get_prior("R_ets_alpha", alpha = 70, beta = 30) # the last three days have >5% impact
+      priors[["R_ets_beta"]] <- get_prior("R_ets_beta", alpha = 30, beta = 70) # the last six days have >5% impact
+      priors[["R_ets_phi"]] <- get_prior("R_ets_phi", alpha = 50, beta = 5)
+      priors[["R_sd"]] <- get_prior("R_sd", mu = 0, sd = 0.3)
+      priors[["R_level_start"]] <- get_prior("R_level_start", mu = log(1), sd = log(5))
+      priors[["R_trend_start"]] <- get_prior("R_trend_start", mu = log(1), sd = log(1.1))
+      priors[["iota_initial"]] <- get_prior("iota_initial", mu = rep(30, stan_data_list$max_gen), sd = rep(10, stan_data_list$max_gen))
+    }
+    
+    return(priors)
+  }
+  
+  return(prior_def)
+  
+}
+
 prepare_data_list <- function(prep_data_complete,
                               prep_data_missing,
                               now,
                               start_date,
                               holidays = NULL,
-                              D = 21,
-                              delay_resolution = NULL,
+                              D,
+                              delay_idx,
                               model_type = "base",
-                              gamma_prior_input = NULL,
-                              gamma_prior_dirichlet_kappa = 1) {
+                              get_priors) {
 
   # --------------------------------------------
   # Reporting triangle
@@ -59,18 +134,6 @@ prepare_data_list <- function(prep_data_complete,
   # estimate initial expected cases based on reported known + unknown assuming a flat delay distribution
   expected_cases_start <- sum(reporting_matrices[["reported_known"]][1, ]) +
     mean(reporting_matrices[["reported_unknown"]][1:D])
-
-  # --------------------------------------------
-  # Delay resolution
-  if (is.null(delay_resolution)) {
-    delay_idx <- seq(1, D + 2)
-  } else {
-    stopifnot(delay_resolution[length(delay_resolution)] == Inf) # last delay resolution must be Inf
-    delay_resolution <- delay_resolution[-length(delay_resolution)] # remove last delay resolution (we do not model it)
-    stopifnot(sum(delay_resolution) == D) # ensure consistency with D
-    delay_idx <- rep(seq(1, length(delay_resolution)), times = delay_resolution)
-    delay_idx <- c(delay_idx, max(delay_idx) + 1, max(delay_idx) + 2) # add final elements for D and beyond
-  }
 
   # ---------------------------
   # Covariates for reporting delay
@@ -132,71 +195,54 @@ prepare_data_list <- function(prep_data_complete,
 
   # ---------------------------
   # Reduce design matrices
-  if (!is.null(delay_resolution)) {
+  if (!all(delay_idx==seq(1, D + 2))) {
     W <- reduce_design_matrix(W, delay_idx)
   }
-
-  # ---------------------------
-  # Prior for gamma
-  if (!is.null(gamma_prior_input)) {
-    stopifnot(nrow(gamma_prior_input) == D)
-    gamma_prior_kappa <- get_prior_gamma(gd.prior.kappa = gamma_prior_dirichlet_kappa, D = D)
-  } else {
-    gamma_prior_kappa <- gamma_prior_input
-  }
-
-  gamma_prior_kappa_df <- data.frame(
-    gamma_idx = delay_idx[1:(length(delay_idx) - 2)],
-    gamma_mu = gamma_prior_kappa$gamma_mu,
-    sigma_gamma = gamma_prior_kappa$sigma_gamma
-  ) %>%
-    group_by(gamma_idx) %>%
-    summarize(across(everything(), mean), .groups = "drop")
-
-  # ---------------------------
-  # Mean of prior for initial iota
-  iota_initial_mean <- rep(30, maxGen)
-  iota_initial_sd <- rep(10, maxGen)
-
+  
   #-------------------------------------------
   # Combine all data/preprocessed objects into list
-  stan_data_list <- list(
-    T = T + 1,
-    D = D,
-    n_delays = max(delay_idx) - 2,
-    delay_idx = delay_idx,
-    n_beta = length(ddChangepoint),
-    n_eta = length(wdays),
-    reported_known = reporting_matrices[["reported_known"]],
-    reported_unknown = reporting_matrices[["reported_unknown"]],
-    expected_cases_start = expected_cases_start,
-    Z = Z,
-    W = W,
-    beta_mu = rep(0, length(ddChangepoint)),
-    beta_sd = c(rep(0.01, length(ddChangepoint))),
-    eta_mu = rep(0, length(wdays)),
-    eta_sd = rep(0.5, length(wdays)),
-    gamma_mu = gamma_prior_kappa_df$gamma_mu,
-    gamma_sd = gamma_prior_kappa_df$sigma_gamma
-  )
+  
+  stan_data_list <- list() # directly used in the Stan model
+  additional_info <- list() # used by other parts of the program or as info for the user
+  
+  # durations
+  stan_data_list[["T"]] <- T + 1
+  stan_data_list[["D"]] <- D
+  stan_data_list[["Z"]] <- Z
+  stan_data_list[["W"]] <- W
+  
+  # observed data
+  stan_data_list[["reported_known"]] <- reporting_matrices[["reported_known"]]
+  stan_data_list[["reported_unknown"]] <- reporting_matrices[["reported_unknown"]]
+  stan_data_list[["expected_cases_start"]] <- expected_cases_start
+  
+  # reporting model
+  stan_data_list[["n_delays"]] <- max(delay_idx) - 2
+  stan_data_list[["delay_idx"]] <- delay_idx
+  stan_data_list[["n_beta"]] <- length(ddChangepoint)
+  stan_data_list[["n_eta"]] <- length(wdays)
 
+  # latent process details
   if (model_type == "latent" | model_type == "renewal") {
     stan_data_list[["L"]] <- L
     stan_data_list[["latent_delay_dist"]] <- latent_delay_dist
   }
 
+  # renewal process details
   if (model_type == "renewal") {
     stan_data_list[["max_gen"]] <- maxGen
     stan_data_list[["generation_time_dist"]] <- generation_time_dist
-    stan_data_list[["iota_initial_mean"]] <- iota_initial_mean
-    stan_data_list[["iota_initial_sd"]] <- iota_initial_sd
   }
-
-  additional_info <- list(
-    all_dates = all_dates,
-    gamma_prior_kappa = gamma_prior_kappa
-  )
-
+  
+  # all dates
+  additional_info[["all_dates"]] <- all_dates
+  
+  # priors
+  priors <- get_priors(stan_data_list)
+  additional_info[["priors"]] <- priors
+  stan_data_list <- append(stan_data_list, flatten(priors))
+  
+  # inits
   additional_info[["inits"]] <- get_inits(stan_data_list, model_type)
 
   return(list(stan_data_list = stan_data_list, additional_info = additional_info))

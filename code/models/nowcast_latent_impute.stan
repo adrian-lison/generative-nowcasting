@@ -13,8 +13,15 @@ data {
   // include reporting delay data and prior information
   #include data/reporting_delay.stan
   
-  // include latent delay data and prior information
+  // include latent delay data
   #include data/latent_delay.stan
+  
+  // priors for iota random walk
+  real iota_log_sd_prior_mu;
+  real<lower=0> iota_log_sd_prior_sd;
+  real iota_log_start_prior_mu;
+  real<lower=0> iota_log_start_prior_sd;
+  
   real xi_negbinom_prior_mu;
   real<lower=0> xi_negbinom_prior_sd;
 }
@@ -83,10 +90,9 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // random walk prior for log latent events (iota_log)
-  iota_log_sd ~ normal(0,0.5) T[0, ]; // truncated normal
-  iota_log_start ~ normal(0,12); // starting prior for AR
-  iota_log_raw[1:L+D+T] ~ normal(0,1); // non-centered
-  
+  iota_log_sd ~ normal(iota_log_sd_prior_mu,iota_log_sd_prior_sd) T[0, ]; // truncated normal
+  iota_log_start ~ normal(iota_log_start_prior_mu,iota_log_start_prior_sd); // starting prior for AR
+  iota_log_raw[1:L+D+T] ~ std_normal(); // non-centered
 
   // Likelihood
   {
