@@ -25,6 +25,8 @@ data {
   
   real<lower=0> iota_initial_mean[max_gen];
   real<lower=0> iota_initial_sd[max_gen];
+  real xi_negbinom_prior_mu;
+  real<lower=0> xi_negbinom_prior_sd;
 }
 
 parameters {
@@ -48,7 +50,7 @@ parameters {
   vector<lower=0>[max_gen+L+D+T] I;
   
   // over-dispersion parameter for negative binomial
-  //real<lower=0> xi_negbinom; // // over-dispersion on the parameter 1 / sqrt(phi) of the negative binomial
+  real<lower=0> xi_negbinom; // // over-dispersion on the parameter 1 / sqrt(phi) of the negative binomial
 }
 transformed parameters {
   // expected number of events by occurrence date
@@ -68,7 +70,7 @@ transformed parameters {
   vector<lower=0,upper=1>[T] alpha;
   
   // over-dispersion parameter for negative binomial
-  //real phi_negbinom = inv_square(xi_negbinom);
+  real phi_negbinom = inv_square(xi_negbinom);
   
   // Smoothing prior for R
   // AR(1) process on log scale, starting value 1 on unit scale
@@ -100,7 +102,7 @@ model {
   #include model/priors_reporting_delay.stan
   
   // prior for overdispersion
-  //xi_negbinom ~ normal(0., 1.);
+  xi_negbinom ~ normal(xi_negbinom_prior_mu, xi_negbinom_prior_sd);
   // in Günther et al. 2021, this was either improper,
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   

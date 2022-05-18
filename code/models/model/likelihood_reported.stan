@@ -16,10 +16,10 @@ Likelihood for reported events with known and unknown occurrence date
   for(t in 1:T) {
     vector[min(T-t,D)+1] expected_overall = lambda[D+t]*p[1:(min(T-t,D)+1),t];
     // likelihood for events with known occurrence date
-    reported_known[t,1:(min(T-t,D)+1)] ~ poisson(expected_overall*alpha[t]+0.1); //, phi_negbinom);
+    reported_known[t,1:(min(T-t,D)+1)] ~ neg_binomial_2(expected_overall*alpha[t]+0.1, phi_negbinom);
     // add expected number of events with unknown occurrence date arising from day t
     expected_a[t:(t+min(T-t,D))] += expected_overall*(1-alpha[t]);
   }
   
   // likelihood for events with unknown occurrence date
-  reported_unknown ~ poisson(expected_a); //, phi_negbinom);
+  reported_unknown ~ neg_binomial_2(expected_a, phi_negbinom);
