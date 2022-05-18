@@ -116,10 +116,6 @@ model {
   I[1:max_gen] ~ normal(iota_initial,sqrt(iota_initial)); // half normal due to constraint
   I[(max_gen+1):(max_gen+L+D+T)] ~ normal(iota,sqrt(iota)); // half normal due to constraint
   
-  // random walk prior for share of events with known occurrence date
-  alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
-  alpha_logit_start ~ normal(0,2); // starting prior
-  alpha_logit_raw[1:T] ~ normal(0,1); // non-centered
 
   // Likelihood
   {

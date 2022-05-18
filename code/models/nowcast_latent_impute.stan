@@ -87,10 +87,6 @@ model {
   iota_log_start ~ normal(0,12); // starting prior for AR
   iota_log_raw[1:L+D+T] ~ normal(0,1); // non-centered
   
-  // random walk prior for share of events with known occurrence date
-  alpha_logit_sd ~ normal(0,0.5) T[0, ]; // truncated normal
-  alpha_logit_start ~ normal(0,2); // starting prior
-  alpha_logit_raw[1:T] ~ normal(0,1); // non-centered
 
   // Likelihood
   {
