@@ -11,7 +11,7 @@ Data and prior information for reporting delay model
 
   // changepoint model for daily hazard
   int n_beta; // number of changepoints
-  row_vector[n_beta] Z[T+D]; // design matrix for changepoint model
+  row_vector[n_beta] Z[n_lambda_pre+T]; // design matrix for changepoint model
   // hyperpriors
   // note: a prior centered at zero assumes that the delay stays constant
   real beta_prior_mu[n_beta];
@@ -19,7 +19,7 @@ Data and prior information for reporting delay model
 
   // reporting day effects / additional covariates
   int n_eta; // number of reporting day / covariate effects
-  matrix[n_delays, n_eta] W[T+D]; // the covariate values
+  matrix[n_delays, n_eta] W[n_lambda_pre+T]; // the covariate values
   // hyperpriors
   real eta_prior_mu[n_eta];
   real<lower=0> eta_prior_sd[n_eta];

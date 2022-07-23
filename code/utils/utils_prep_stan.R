@@ -2,122 +2,124 @@
 ##                  Stan data list preparation                   -
 ## ----------------------------------------------------------------
 
-get_inits <- function(stan_data_list, model_type) {
+compute_backward_delay <- function(time_series, forward_delay_dist){
+  bd <- matrix(0, nrow = length(time_series) + length(forward_delay_dist) - 1, ncol = length(forward_delay_dist))
+  for (i in 1:length(time_series)){
+    for (d in 1:length(forward_delay_dist)){
+      bd[i + d - 1, d] <- bd[i + d - 1, d] + time_series[i] * forward_delay_dist[d]
+    }
+  }
+  for (i in 1:(length(time_series) + length(forward_delay_dist) - 1)){
+    if (sum(bd[i, ])>0) bd[i, ] <- bd[i, ] / sum(bd[i, ])
+  }
+  return(bd)
+}
+
+random_inits <- function(stan_data_list, model_type) {
+  return (NULL)
+}
+
+default_inits <- function(stan_data_list, model_type) {
+  known_by_reference_date <- rowSums(stan_data_list$reported_known)
+  if (sum(stan_data_list$reported_unknown)>0) {
+    unknown_by_reference_date <- rep(0, stan_data_list$T)
+    for (i in 1:stan_data_list$T) {
+      # assume flat reporting delay
+      unknown_fraction <- stan_data_list$reported_unknown[i] / (stan_data_list$D + 1)
+      unknown_by_reference_date[max((i - stan_data_list$D), 1):i] <- unknown_by_reference_date[max((i - stan_data_list$D), 1):i] + unknown_fraction
+    }
+    all_by_reference_date <- unknown_by_reference_date + known_by_reference_date
+    alpha_emp <- known_by_reference_date / all_by_reference_date
+    alpha_emp <- mean(alpha_emp[1:7])
+  } else {
+    all_by_reference_date <- known_by_reference_date
+    alpha_emp <- rep(1-1e-4,7)
+  }
+  alpha_emp_logit <- qlogis(alpha_emp)
+
+  # get crude estimate of baseline hazard, assume beta and eta are zero
+  gamma_emp <- rowMeans(sapply(1:7, function(i) stan_data_list$reported_known[i, ] / sum(stan_data_list$reported_known[i, ])))
+  gamma_emp_haz <- get_hazard_from_p(gamma_emp)
+  gamma_emp_haz_reduced <- rep(0, stan_data_list$n_delays)
+  for (i in 1:stan_data_list$n_delays) {
+    gamma_emp_haz_reduced[i] <- mean(gamma_emp_haz[stan_data_list$delay_idx == i])
+  }
+
+  if (!(model_type %in% c("base","base_old"))) {
+  # assume infections = symptom onsets shifted by mean incubation period
+  medianInc <- weighted.median(0:(length(stan_data_list$latent_delay_dist) - 1), stan_data_list$latent_delay_dist)
+  shift_backward <- function(x, shift) c(x[(1 + shift):length(x)], rep(NA, times = shift))
+  I_length <- stan_data_list$L + stan_data_list$n_lambda_pre + stan_data_list$T
+  start_t <- stan_data_list$L + stan_data_list$n_lambda_pre
+  I_by_reference_date <- rep(NA, I_length)
+  I_by_reference_date[(start_t + 1):(start_t + length(all_by_reference_date))] <- all_by_reference_date
+  firstI <- I_by_reference_date[start_t + 1]
+  lastI <- I_by_reference_date[start_t + length(all_by_reference_date)]
+  I_by_reference_date <- shift_backward(I_by_reference_date, medianInc)
+  I_by_reference_date[1:(start_t - medianInc)] <- firstI
+  I_by_reference_date[(start_t + length(all_by_reference_date) - medianInc):(start_t + length(all_by_reference_date))] <- lastI
+  # back-calculate iota values and R time series
+  gt_mean <- weighted.mean(0:(length(stan_data_list$generation_time_dist) - 1), stan_data_list$generation_time_dist)
+  gt_var <- weighted.mean((0:(length(stan_data_list$generation_time_dist) - 1))^2, stan_data_list$generation_time_dist) - gt_mean^2
+  R_emp <- c(NA, NA, EpiEstim::estimate_R(
+    incid = I_by_reference_date,
+    method = "parametric_si",
+    config = EpiEstim::make_config(
+      list(
+        mean_si = gt_mean,
+        std_si = sqrt(gt_var),
+        t_start = 2:(length(I_by_reference_date) - 1),
+        t_end = 3:length(I_by_reference_date),
+        mean_prior = 1
+      )
+    )
+  )$R$`Mean(R)`)
+  }
+
   return(
     function() {
       inits <- list()
 
-      inits[["alpha_logit_start"]] <- rnorm(n = 1, mean = 0, sd = 2)
-      inits[["alpha_logit_raw"]] <- rep(rnorm(n = 1), stan_data_list[[T]])
-      inits[["alpha_logit_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
+      # use an empirical estimate of alpha and assume it remains roughly unchanged over time
+      inits[["alpha_logit_start"]] <- alpha_emp_logit
+      inits[["alpha_logit_noise"]] <- rep(0, stan_data_list$T)
+      inits[["alpha_logit_sd"]] <- rtnorm(n = 1, mean = stan_data_list$alpha_logit_sd_prior_mu, sd = stan_data_list$alpha_logit_sd_prior_sd / 4, a = 0) # truncated
 
-      inits[["gamma"]] <- rnorm(n = stan_data_list$n_delays, mean = stan_data_list$gamma_prior_mu, sd = stan_data_list$gamma_prior_sd)
-      inits[["beta"]] <- rnorm(n = stan_data_list$n_beta, mean = stan_data_list$beta_prior_mu, sd = stan_data_list$beta_prior_sd)
-      inits[["eta"]] <- rnorm(n = stan_data_list$n_eta, mean = stan_data_list$eta_prior_mu, sd = stan_data_list$eta_prior_sd)
+      inits[["gamma"]] <- gamma_emp_haz_reduced
+      inits[["beta"]] <- rep(1e-4, stan_data_list$n_beta)
+      inits[["eta"]] <- rep(1e-4, stan_data_list$n_eta)
 
-      inits[["xi_negbinom"]] <- rnorm(n = 1, mean = stan_data_list$xi_negbinom_prior_mu, sd = stan_data_list$xi_negbinom_prior_sd)
-      
-      if (model_type == "base") {
-        inits[["lambda_log_start"]] <- rnorm(n = 1, mean = log(stan_data_list$expected_cases_start), sd = 0.2)
-        inits[["lambda_log_raw"]] <- rnorm(n = stan_data_list[[T]])
-        inits[["lambda_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
+      inits[["xi_negbinom"]] <- rtnorm(n = 1, mean = stan_data_list$xi_negbinom_prior_mu, sd = stan_data_list$xi_negbinom_prior_sd / 4, a = 0)
+
+      if (model_type %in% c("base","base_old")) {
+        inits[["ets_alpha"]] <- 1 - 1e-4
+        inits[["ets_beta"]] <- 1 - 1e-4
+        inits[["ets_phi"]] <- 1 - 1e-4
+        inits[["lambda_log_start_values"]] <- c(log(stan_data_list$expected_cases_start),rep(0,1+stan_data_list$ets_diff))
+        inits[["lambda_log_noise"]] <- rep(0, stan_data_list$T + stan_data_list$n_lambda_pre - 1 - stan_data_list$ets_diff) #rnorm(n = stan_data_list$T + stan_data_list$n_lambda_pre - 1)
+        inits[["lambda_log_sd"]] <- stan_data_list$lambda_log_sd_prior_mu + stan_data_list$lambda_log_sd_prior_sd / 2 #rtnorm(n = 1, stan_data_list$lambda_log_sd_prior_mu, sd = stan_data_list$lambda_log_sd_prior_sd / 4, a = 0) # truncated
       } else if (model_type == "latent") {
         # use initial expected cases as proxy for initial expected infections
         inits[["iota_log_start"]] <- rnorm(n = 1, mean = log(stan_data_list$expected_cases_start), sd = 0.4)
-        inits[["iota_log_raw"]] <- rnorm(n = stan_data_list[[T]])
-        inits[["iota_log_sd"]] <- rhnorm(n = 1, sigma = 0.5) # half-normal
+        inits[["iota_log_sd"]] <- 1
+        inits[["iota_log_noise"]] <- c(0, diff(log(I_by_reference_date))[1:(stan_data_list$T + stan_data_list$L + stan_data_list$n_lambda_pre)])
       } else if (model_type == "renewal") {
-        inits[["R_ets_alpha"]] <- rbeta(n = 1, 4, 4)
-        inits[["R_ets_beta"]] <- rbeta(n = 1, 4, 4)
-        inits[["R_ets_phi"]] <- rbeta(n = 1, 50, 5)
-        inits[["R_level_start"]] <- rnorm(n = 1, mean = log(1), 0.8)
-        inits[["R_trend_start"]] <- rnorm(n = 1, mean = 0, 0.2)
-        inits[["R_raw"]] <- rnorm(n = stan_data_list[[T]])
-        inits[["R_sd"]] <- rhnorm(n = 1, sigma = 0.3) # half-normal
-
+        inits[["ets_alpha"]] <- 1 - 1e-4 # rbeta(n = 1, stan_data_list$ets_alpha_prior_alpha, stan_data_list$ets_alpha_prior_beta)
+        inits[["ets_beta"]] <- 1 - 1e-4 # rbeta(n = 1, stan_data_list$ets_beta_prior_alpha, stan_data_list$ets_beta_prior_beta)
+        inits[["ets_phi"]] <- 1 - 1e-4 # rbeta(n = 1, stan_data_list$ets_phi_prior_alpha, stan_data_list$ets_phi_prior_beta)
+        inits[["R_level_start"]] <- R_emp[stan_data_list$max_gen + 1] # rtnorm(n = 1, mean = stan_data_list$R_level_start_prior_mu, sd = stan_data_list$R_level_start_prior_sd / 4, a = 0) # truncated
+        inits[["R_trend_start"]] <- 1e-4 # rnorm(n = 1, mean = stan_data_list$R_trend_start_prior_mu, sd = stan_data_list$R_trend_start_prior_sd / 4)
+        inits[["R_sd"]] <- 1
+        inits[["R_noise"]] <- rep(0, stan_data_list$L + stan_data_list$n_lambda_pre + stan_data_list$T - stan_data_list$max_gen - 1)# c(0, diff(R_emp))[(stan_data_list$max_gen + 2):(stan_data_list$L + stan_data_list$n_lambda_pre + stan_data_list$T)]
         # use initial expected cases as proxy for infections / expected infections
-        inits[["iota_initial"]] <- rtnorm(n = stan_data_list$max_gen, mean = stan_data_list$expected_cases_start, sd = 0.5, a = 0)
-        I_length <- stan_data_list$max_gen + stan_data_list$L + stan_data_list$D + stan_data_list$T
-        inits[["I"]] <- rtnorm(n = I_length, mean = stan_data_list$expected_cases_start, sd = 0.6, a = 0)
+        inits[["iota_log_ar_start"]] <- log(I_by_reference_date[1])
+        inits[["iota_log_ar_sd"]] <- 1
+        inits[["iota_log_ar_noise"]] <- c(0, diff(log(I_by_reference_date))[1:(stan_data_list$max_gen - 1)])
+        inits[["I"]] <- I_by_reference_date
       }
-
       return(inits)
     }
   )
-}
-
-get_prior <- function(variable, ...){
-  prior_list <- list()
-  prior_values <- list(...)
-  for(v in names(prior_values)){
-    prior_list[[paste0(variable,"_prior_",v)]] <- prior_values[[v]]
-  }
-  return(prior_list)
-}
-
-define_priors <- function(model_def,
-                          dirichlet_kappa = 1,
-                          gamma_prior_precomputed_dir = here::here("code", "models", "priors_precomputed")) {
-  prior_def <- list()
-  prior_def[["dirichlet_kappa"]] <- dirichlet_kappa
-  
-  # Check if precomputed gamma (baseline reporting hazard) prior exists
-  if (!dir.exists(gamma_prior_precomputed_dir)) dir.create(gamma_prior_precomputed_dir)
-  gamma_prior_filepath <- here::here(gamma_prior_precomputed_dir, paste0("gamma_prior_k", dirichlet_kappa, "_D", model_def$D, ".rds"))
-  prior_def[["gamma_prior_precomputed_path"]] <- gamma_prior_filepath
-  if (file.exists(gamma_prior_filepath)) {
-    gamma_prior_kappa <- readRDS(gamma_prior_filepath)
-    stopifnot(nrow(gamma_prior_kappa) == model_def$D)
-  } else {
-    # precompute prior
-    gamma_prior_kappa <- get_prior_gamma(gd.prior.kappa = dirichlet_kappa, D = D)
-  }
-  prior_def[["gamma_prior_kappa"]] <- gamma_prior_kappa
-  
-  gamma_prior_kappa_df <- data.frame(
-    gamma_idx = model_def$delay_idx[1:(length(model_def$delay_idx) - 2)],
-    gamma_mu = gamma_prior_kappa$gamma_mu,
-    sigma_gamma = gamma_prior_kappa$sigma_gamma
-  ) %>%
-    group_by(gamma_idx) %>%
-    summarize(across(everything(), mean), .groups = "drop")
-  
-  prior_def[["get_priors"]] <- function(stan_data_list){
-    priors <- list()
-    
-    priors[["alpha_logit_sd"]] = get_prior("alpha_logit_sd", mu = 0, sd = 0.5)
-    priors[["alpha_logit_start"]] = get_prior("alpha_logit_start", mu = 0, sd = 2)
-    priors[["beta"]] = get_prior("beta", mu = rep(0, stan_data_list$n_beta), sd = c(rep(0.01, stan_data_list$n_beta)))
-    priors[["eta"]] = get_prior("eta", mu = rep(0, stan_data_list$n_eta), sd = c(rep(0.5, stan_data_list$n_eta)))
-    priors[["gamma"]] = get_prior("gamma", mu = gamma_prior_kappa_df$gamma_mu, sd = gamma_prior_kappa_df$sigma_gamma)
-    
-    priors[["xi_negbinom"]] = get_prior("xi_negbinom", mu = 0, sd = 1)
-    
-    if (model_def$model_type == "base") {
-      priors[["lambda_log_sd"]] <- get_prior("lambda_log_sd", mu = 0, sd = 0.5)
-      priors[["lambda_log_start"]] <- get_prior("lambda_log_start", mu = 0, sd = 12)
-    }
-    
-    if (model_def$model_type == "latent") {
-      priors[["iota_log_sd"]] <- get_prior("iota_log_sd", mu = 0, sd = 0.5)
-      priors[["iota_log_start"]] <- get_prior("iota_log_start", mu = 0, sd = 12)
-    }
-    
-    if (model_def$model_type == "renewal") {
-      priors[["R_ets_alpha"]] <- get_prior("R_ets_alpha", alpha = 70, beta = 30) # the last three days have >5% impact
-      priors[["R_ets_beta"]] <- get_prior("R_ets_beta", alpha = 30, beta = 70) # the last six days have >5% impact
-      priors[["R_ets_phi"]] <- get_prior("R_ets_phi", alpha = 50, beta = 5)
-      priors[["R_sd"]] <- get_prior("R_sd", mu = 0, sd = 0.3)
-      priors[["R_level_start"]] <- get_prior("R_level_start", mu = log(1), sd = log(5))
-      priors[["R_trend_start"]] <- get_prior("R_trend_start", mu = log(1), sd = log(1.1))
-      priors[["iota_initial"]] <- get_prior("iota_initial", mu = rep(30, stan_data_list$max_gen), sd = rep(10, stan_data_list$max_gen))
-    }
-    
-    return(priors)
-  }
-  
-  return(prior_def)
-  
 }
 
 prepare_data_list <- function(prep_data_complete,
@@ -127,8 +129,8 @@ prepare_data_list <- function(prep_data_complete,
                               holidays = NULL,
                               D,
                               delay_idx,
-                              model_type = "base",
-                              get_priors) {
+                              n_lambda_pre,
+                              model_type = "base") {
 
   # --------------------------------------------
   # Reporting triangle
@@ -141,21 +143,21 @@ prepare_data_list <- function(prep_data_complete,
   # ---------------------------
   # Covariates for reporting delay
   all_dates <- seq(start_date, now, by = "1 day")
-  tswp <- seq(start_date - D, now, by = "1 day") # time series including the days of the modeling phase
+  tswp <- seq(start_date - n_lambda_pre, now, by = "1 day") # time series including the days of the modeling phase
   T <- length(all_dates) - 1
 
   ## 1) Segmented linear model for change over time
   ddChangepoint <- rev(seq(now, start_date, by = "-2 weeks"))
   Z_idx <- rev(rep(length(ddChangepoint):1, each = 14)[1:(1 + T)])
-  Z <- array(NA, dim = c(T + 1 + D, length(ddChangepoint)), dimnames = list(as.character(tswp), 1:length(ddChangepoint)))
-  for (t_pre in 1:D) {
+  Z <- array(NA, dim = c(T + 1 + n_lambda_pre, length(ddChangepoint)), dimnames = list(as.character(tswp), 1:length(ddChangepoint)))
+  for (t_pre in 1:n_lambda_pre) {
     Z[t_pre, ] <- rep(0, length(ddChangepoint)) # we don't have a changepoint model before the inference phase, but fill the space up with 0s to have the same dimensionality as the other matrices
   }
   for (t in 0:T) {
     covariates_ind_days <- c(0, as.numeric(all_dates <= (all_dates[t + 1]))[-1])
-    Z[D + 1 + t, ] <- tapply(covariates_ind_days, Z_idx, sum) # add up counts in each changepoint interval
+    Z[n_lambda_pre + 1 + t, ] <- tapply(covariates_ind_days, Z_idx, sum) # add up counts in each changepoint interval
   }
-  # scale columns by standard deviation for better efficiency
+  # scale columns by maximum for better efficiency
   Z <- Z / (max(Z) * 0.68)
 
 
@@ -198,27 +200,30 @@ prepare_data_list <- function(prep_data_complete,
 
   # ---------------------------
   # Reduce design matrices
-  if (!all(delay_idx==seq(1, D + 2))) {
+  if (!all(delay_idx == seq(1, D + 2))) {
     W <- reduce_design_matrix(W, delay_idx)
   }
-  
+
   #-------------------------------------------
   # Combine all data/preprocessed objects into list
-  
+
   stan_data_list <- list() # directly used in the Stan model
   additional_info <- list() # used by other parts of the program or as info for the user
-  
+
   # durations
   stan_data_list[["T"]] <- T + 1
   stan_data_list[["D"]] <- D
   stan_data_list[["Z"]] <- Z
   stan_data_list[["W"]] <- W
-  
+  stan_data_list[["n_lambda_pre"]] <- n_lambda_pre
+  pre_diff <- D - n_lambda_pre
+
   # observed data
   stan_data_list[["reported_known"]] <- reporting_matrices[["reported_known"]]
   stan_data_list[["reported_unknown"]] <- reporting_matrices[["reported_unknown"]]
   stan_data_list[["expected_cases_start"]] <- expected_cases_start
-  
+  if (pre_diff>0) stan_data_list[["emp_alpha"]] <- reporting_matrices[["emp_alpha"]][1:pre_diff]
+
   # reporting model
   stan_data_list[["n_delays"]] <- max(delay_idx) - 2
   stan_data_list[["delay_idx"]] <- delay_idx
@@ -226,27 +231,19 @@ prepare_data_list <- function(prep_data_complete,
   stan_data_list[["n_eta"]] <- length(wdays)
 
   # latent process details
-  if (model_type == "latent" | model_type == "renewal") {
+  if (model_type == "latent" | model_type %in% c("renewal", "renewal_noncentered", "renewal_deterministic")) {
     stan_data_list[["L"]] <- L
     stan_data_list[["latent_delay_dist"]] <- latent_delay_dist
   }
 
   # renewal process details
-  if (model_type == "renewal") {
+  if (model_type %in% c("renewal", "renewal_noncentered", "renewal_deterministic")) {
     stan_data_list[["max_gen"]] <- maxGen
     stan_data_list[["generation_time_dist"]] <- generation_time_dist
   }
-  
+
   # all dates
   additional_info[["all_dates"]] <- all_dates
-  
-  # priors
-  priors <- get_priors(stan_data_list)
-  additional_info[["priors"]] <- priors
-  stan_data_list <- append(stan_data_list, flatten(priors))
-  
-  # inits
-  additional_info[["inits"]] <- get_inits(stan_data_list, model_type)
 
   return(list(stan_data_list = stan_data_list, additional_info = additional_info))
 }
@@ -287,7 +284,7 @@ prepare_reporting_data <- function(prep_data_complete, prep_data_missing, now, s
   # Compute triangle
   reporting_triangle %<>%
     group_by(event1_date, delay) %>%
-    summarize(n = sum(n), .groups = "drop") %>%
+    dplyr::summarize(n = sum(n), .groups = "drop") %>%
     complete(delay = 0:D, event1_date, fill = list(n = 0)) %>%
     arrange(delay, event1_date) %>%
     pivot_wider(names_from = delay, values_from = n) %>%
@@ -301,15 +298,48 @@ prepare_reporting_data <- function(prep_data_complete, prep_data_missing, now, s
 
   # -------------------------
   # Cases with unobserved type 1 event
-  unobserved_matrix <- prep_data_missing %>%
+  unobserved <- prep_data_missing %>%
     group_by(event2_date) %>%
-    summarize(n = sum(n), .groups = "keep") %>%
+    dplyr::summarize(n = sum(n), .groups = "drop") %>%
     filter(event2_date >= start_date, event2_date <= now) %>%
-    ungroup() %>%
-    complete(event2_date = seq.Date(start_date, now, by = "1 day"), fill = list(n = 0)) %>%
-    pull(n)
+    complete(event2_date = seq.Date(start_date, now, by = "1 day"), fill = list(n = 0))
 
-  return(list(reported_known = reporting_matrix, reported_unknown = unobserved_matrix))
+  unobserved_matrix <- unobserved %>% pull(n)
+
+  # -------------------------
+  # Seed for expected cases with unobserved type 1 event (based on backward delays)
+  emp_backward_delay_dist <- prep_data_complete %>%
+    filter(event2_date >= start_date, event2_date <= now) %>%
+    get_empirical_backward_delay(D)
+
+  emp_alpha <- unobserved %>%
+    inner_join(emp_backward_delay_dist, by = "event2_date") %>%
+    mutate(a = n * p, event1_date = event2_date - delay) %>%
+    group_by(event1_date) %>%
+    summarize(unobserved = sum(a)) %>%
+    inner_join(reporting_triangle %>%
+      transmute(event1_date, observed = rowSums(across(-event1_date))),
+    by = "event1_date"
+    ) %>%
+    mutate(alpha = observed / (observed + unobserved)) %>%
+    ungroup() %>% 
+    mutate(alpha = ifelse(is.nan(alpha),NA,alpha)) %>% 
+    fill(alpha, .direction = "downup") %>% 
+    pull(alpha)
+
+  return(list(reported_known = reporting_matrix, reported_unknown = unobserved_matrix, emp_alpha = emp_alpha))
+}
+
+get_empirical_backward_delay <- function(df, D) {
+  df %>% 
+    mutate(delay = as.numeric(event2_date - event1_date)) %>%
+    filter(delay >= 0) %>% # remove negative delays
+    mutate(delay = ifelse(delay > D, D, delay)) %>% # truncate delays longer than D
+    count(event2_date, delay) %>%
+    complete(event2_date, delay = 0:D, fill = list(n = 0)) %>%
+    group_by(event2_date) %>%
+    transmute(delay, p = n / sum(n)) %>% 
+    return()
 }
 
 ## -------------------------------------------------------------

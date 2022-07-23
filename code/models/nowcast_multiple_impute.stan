@@ -14,14 +14,16 @@ data {
   int<lower=0> n_lambda_pre; // number of days used for modeling of latent process before first data
   
   int reported_known[T, D+1]; // reporting triangle
-  int reported_unknown[T]; // observations with unknown occurrence date
+  
+  int n_imputations; // number of different imputations
+  array[n_imputations, T, D+1] int reported_unknown_imputed; // imputed reporting triangle
   
   // include reporting delay data and prior information
 #include data/reporting_delay.stan
   
   // include priors/settings for exponential smoothing
 #include data/data_ets.stan
-  
+
   // standard deviation of noise/increments
   real lambda_log_sd_prior_mu;
   real<lower=0> lambda_log_sd_prior_sd;
@@ -40,19 +42,23 @@ data {
   real<lower=0> xi_negbinom_prior_sd;
 }
 
+transformed data {
+  array[n_imputations, T, D+1] int reported_imputed;
+  for (i in 1:n_imputations) {
+    reported_imputed[i,,] = reported_known + reported_unknown_imputed[i,,];
+  }
+}
+
 parameters {
   // exponential smoothing / innovations state space process for log(lambda)
   real<lower=0,upper=1> ets_alpha[ets_alpha_fixed < 0 ? 1 : 0]; // smoothing parameter for the level
   real<lower=0,upper=1> ets_beta[ets_beta_fixed < 0 ? 1 : 0]; // smoothing parameter for the trend
   real<lower=0,upper=1> ets_phi[ets_phi_fixed < 0 ? 1 : 0]; // dampening parameter of the trend
-  vector[2+ets_diff] lambda_log_start_values; // starting value of the level, trend [, and curvature if diff]
-  real<lower=0> lambda_log_sd; // standard deviation of process noise
-  vector<multiplier=(ets_noncentered ? lambda_log_sd : 1)>[n_lambda_pre+T-1-ets_diff] lambda_log_noise; // process noise
-  
-  // random walk parameters for alpha
-  real alpha_logit_start;
-  real<lower=0> alpha_logit_sd;
-  vector<multiplier=alpha_logit_sd>[T-1] alpha_logit_noise; // process noise
+  real lambda_log_level_start; // starting value of the level
+  real lambda_log_trend_start; // starting value of the trend
+  real lambda_log_2nd_trend_start[ets_diff ? 1 : 0];
+  vector[ets_diff ? n_lambda_pre+T-2 : n_lambda_pre+T-1] lambda_log_raw; // nuisance parameter for non-centered parameterization
+  real<lower=0> lambda_log_sd;
   
   // reporting delay model parameters
 #include parameters/reporting_delay.stan
@@ -68,10 +74,6 @@ transformed parameters {
   matrix[D+1, T] p_log;
   matrix[D+1, n_lambda_pre] p_log_pre;
   
-  // share of events with known occurrence date, by occurrence date
-  vector[T] alpha_log;
-  vector[T] alpha1m_log;
-  
   // over-dispersion parameter for negative binomial
   real phi_negbinom;
   if (overdispersion) {
@@ -79,22 +81,21 @@ transformed parameters {
   }
   
   // occurrence process
-  lambda_log = holt_damped_process(
-    lambda_log_start_values,
+  // AR(1) process on log scale
+  if (ets_diff) {
+    lambda_log = diff_holt_damped_process_noncentered(
+    lambda_log_level_start,
     ets_alpha_fixed < 0 ? ets_alpha[1] : ets_alpha_fixed,
     ets_beta_fixed < 0 ? ets_beta[1] : ets_beta_fixed,
     ets_phi_fixed < 0 ? ets_phi[1] : ets_phi_fixed,
-    lambda_log_noise,
-    ets_diff);
-    
-  // share of events with known occurrence date process
-  // AR(1) process on logit scale
-  {
-    vector[T] alpha_logit = random_walk([alpha_logit_start]', alpha_logit_noise, 0);
-    alpha_log = log_inv_logit(alpha_logit);
-    alpha1m_log = log1m_inv_logit(alpha_logit);
+    lambda_log_trend_start, lambda_log_2nd_trend_start[1], lambda_log_raw*lambda_log_sd);
+  } else {
+    lambda_log =holt_damped_process(
+    ets_alpha_fixed < 0 ? ets_alpha[1] : ets_alpha_fixed,
+    ets_beta_fixed < 0 ? ets_beta[1] : ets_beta_fixed,
+    ets_phi_fixed < 0 ? ets_phi[1] : ets_phi_fixed,
+    lambda_log_level_start, lambda_log_trend_start, lambda_log_raw*lambda_log_sd);
   }
-
   
   // reporting delay model: hazards and probabilities
   {
@@ -105,40 +106,42 @@ transformed parameters {
 model {
   // Priors
   
-  // priors for reporting delay model
-#include model/priors_reporting_delay.stan
+    // baseline hazard gamma_d
+  gamma ~ normal(gamma_prior_mu, gamma_prior_sd);
+  // changepoint model for daily hazard
+  beta ~ normal(beta_prior_mu, beta_prior_sd);
+  // reporting day / additional covariate effects
+  eta ~ normal(eta_prior_mu, eta_prior_sd);
   
   // prior for overdispersion
   if (overdispersion) {
     xi_negbinom[1] ~ normal(xi_negbinom_prior_mu, xi_negbinom_prior_sd) T[0, ]; // truncated normal
   }
-  // in Günther et al. 2021, this was either improper,
-  // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // ETS/Innovations state space process prior for log(lambda)
   if(ets_alpha_fixed < 0) {
-    ets_alpha[1] ~ beta(ets_alpha_prior_alpha[1], ets_alpha_prior_beta[1]); 
+    ets_alpha[1] ~ beta(ets_alpha_prior_alpha[1],ets_alpha_prior_beta[1]); 
   }
   if(ets_beta_fixed < 0) {
-    ets_beta[1] ~ beta(ets_beta_prior_alpha[1], ets_beta_prior_beta[1]); 
+    ets_beta[1] ~ beta(ets_beta_prior_alpha[1],ets_beta_prior_beta[1]); 
   }
   if(ets_phi_fixed < 0) {
-    ets_phi[1] ~ beta(ets_phi_prior_alpha[1], ets_phi_prior_beta[1]); // dampening needs a tight prior, roughly between 0.8 and 0.98
+    ets_phi[1] ~ beta(ets_phi_prior_alpha[1],ets_phi_prior_beta[1]); // dampening needs a tight prior, roughly between 0.8 and 0.98
   }
-  lambda_log_start_values[1] ~ normal(lambda_log_level_start_prior_mu, lambda_log_level_start_prior_sd); // starting prior for AR
-  lambda_log_start_values[2] ~ normal(lambda_log_trend_start_prior_mu, lambda_log_trend_start_prior_sd);
-  if (ets_diff == 1) {
-    lambda_log_start_values[3] ~ normal(lambda_log_2nd_trend_start_prior_mu, lambda_log_2nd_trend_start_prior_sd);
+  lambda_log_sd ~ normal(lambda_log_sd_prior_mu,lambda_log_sd_prior_sd) T[0, ]; // truncated normal
+  lambda_log_level_start ~ normal(lambda_log_level_start_prior_mu,lambda_log_level_start_prior_sd); // starting prior for AR
+  lambda_log_trend_start ~ normal(lambda_log_trend_start_prior_mu,lambda_log_trend_start_prior_sd);
+  if (ets_diff) {
+    lambda_log_2nd_trend_start ~ normal(lambda_log_2nd_trend_start_prior_mu,lambda_log_2nd_trend_start_prior_sd);
   }
-  lambda_log_sd ~ normal(lambda_log_sd_prior_mu, lambda_log_sd_prior_sd) T[0, ]; // truncated normal
-  lambda_log_noise ~ normal(0, lambda_log_sd); // Gaussian noise
+  lambda_log_raw ~ std_normal(); // non-centered
 
   // Likelihood
   {
-#include model/likelihood_reported.stan
+#include model/likelihood_reported_multiple_impute.stan
   }
   
 }
 generated quantities {
-#include generated_quantities/nowcast.stan
+#include generated_quantities/nowcast_multiple_impute.stan
 }
