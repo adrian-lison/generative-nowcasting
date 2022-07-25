@@ -2,27 +2,27 @@
 Data and prior information for reporting delay model
 ---------------------------------------------------------------------------- */
   // resolution of baseline hazard
-  int delay_idx[D+2]; // mapping from delays to baseline hazards
+  array[D+2] int delay_idx; // mapping from delays to baseline hazards
 
   // baseline hazard gamma_d
   // prior information
-  real gamma_prior_mu[n_delays];
-  real<lower=0> gamma_prior_sd[n_delays];
+  array[n_delays] real gamma_prior_mu;
+  array[n_delays] real<lower=0> gamma_prior_sd;
 
   // changepoint model for daily hazard
   int n_beta; // number of changepoints
-  row_vector[n_beta] Z[n_lambda_pre+T]; // design matrix for changepoint model
+  array[n_lambda_pre+T] row_vector[n_beta] Z; // design matrix for changepoint model
   // hyperpriors
   // note: a prior centered at zero assumes that the delay stays constant
-  real beta_prior_mu[n_beta];
-  real<lower=0> beta_prior_sd[n_beta];
+  array[n_beta] real beta_prior_mu;
+  array[n_beta] real<lower=0> beta_prior_sd;
 
   // reporting day effects / additional covariates
   int n_eta; // number of reporting day / covariate effects
-  matrix[n_delays, n_eta] W[n_lambda_pre+T]; // the covariate values
+  array[n_lambda_pre+T] matrix[n_delays, n_eta] W; // the covariate values
   // hyperpriors
-  real eta_prior_mu[n_eta];
-  real<lower=0> eta_prior_sd[n_eta];
+  array[n_eta] real eta_prior_mu;
+  array[n_eta] real<lower=0> eta_prior_sd;
   
   // priors for share of events with known occurrence date
   // AR(1) noise sd (truncated normal)

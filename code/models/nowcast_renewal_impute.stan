@@ -13,8 +13,8 @@ data {
   
   int<lower=0> n_lambda_pre; // number of days used for modeling of latent process before first data
   
-  int reported_known[T, D+1]; // reporting triangle
-  int reported_unknown[T]; // observations with unknown occurrence date
+  array[T, D+1] int reported_known; // reporting triangle
+  array[T] int reported_unknown; // observations with unknown occurrence date
   
   // include reporting delay data and prior information
 #include data/reporting_delay.stan
@@ -59,9 +59,9 @@ transformed data {
 
 parameters {
   // exponential smoothing / innovations state space process for log(R)
-  real<lower=0,upper=1> ets_alpha[ets_alpha_fixed < 0 ? 1 : 0]; // smoothing parameter for the level
-  real<lower=0,upper=1> ets_beta[ets_beta_fixed < 0 ? 1 : 0]; // smoothing parameter for the trend
-  real<lower=0,upper=1> ets_phi[ets_phi_fixed < 0 ? 1 : 0]; // dampening parameter of the trend
+  array[ets_alpha_fixed < 0 ? 1 : 0] real<lower=0,upper=1> ets_alpha; // smoothing parameter for the level
+  array[ets_beta_fixed < 0 ? 1 : 0] real<lower=0,upper=1> ets_beta; // smoothing parameter for the trend
+  array[ets_phi_fixed < 0 ? 1 : 0] real<lower=0,upper=1> ets_phi; // dampening parameter of the trend
   real R_level_start; // starting value of the level
   real R_trend_start; // starting value of the trend
   real<lower=0> R_sd; // standard deviation of additive errors
@@ -82,7 +82,7 @@ parameters {
   vector<lower=0>[L+n_lambda_pre+T] I;
   
   // over-dispersion parameter for negative binomial
-  real<lower=0> xi_negbinom[overdispersion ? 1 : 0]; // over-dispersion on the parameter 1 / sqrt(phi) of the negative binomial
+  array[overdispersion ? 1 : 0] real<lower=0> xi_negbinom; // over-dispersion on the parameter 1 / sqrt(phi) of the negative binomial
 }
 transformed parameters {
   // expected number of events by occurrence date

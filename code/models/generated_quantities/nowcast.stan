@@ -1,13 +1,13 @@
 /** ---------------------------------------------------------------------------
 Generated quantities for nowcast
 ---------------------------------------------------------------------------- */
-  int nowcast_known[T];
-  int nowcast_unknown[T];
+  array[T] int nowcast_known;
+  array[T] int nowcast_unknown;
   vector[T] predicted_missing_rep = rep_vector(0,T);
   
   for(t in 1:(T)) {
-    int nT_known[D+1];
-    int nT_unknown[D+1];
+    array[D+1] int nT_known;
+    array[D+1] int nT_unknown;
     
     // occurrence dates where all events have been observed (D reached)
     nT_known[1:(1+min(D,T-t))] = reported_known[t, 1:(1+min(D,T-t))];

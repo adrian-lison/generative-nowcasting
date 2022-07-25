@@ -1,13 +1,13 @@
 /** ---------------------------------------------------------------------------
 Generated quantities for nowcast
 ---------------------------------------------------------------------------- */
-  int nowcast_known[T];
+  array[T] int nowcast_known;
 
   {
     int draw = discrete_range_rng(1, n_imputations);
     
     for (t in 1:(T)) {
-      int nT_known[D+1];
+      array[D+1] int nT_known;
       
       // occurrence dates where all events have been observed (D reached)
       nT_known[1:(1+min(D,T-t))] = reported_imputed[draw, t, 1:(1+min(D,T-t))];
