@@ -8,11 +8,11 @@ Likelihood for reported events with known occurrence date, multiple imputation
     // likelihood for events with known occurrence date
     if (overdispersion) {
       for (draw in 1:n_imputations) {
-        target += 1/n_imputations * neg_binomial_2_log_lupmf(reported_imputed[draw,t,1:(1+min(T-t,D))] | expected_overall_log, phi_negbinom);
+        target += 1.0/n_imputations * neg_binomial_2_log_lupmf(reported_imputed[draw,t,1:(1+min(T-t,D))] | expected_overall_log, phi_negbinom);
       }
     } else {
       for (draw in 1:n_imputations) {
-      target += 1/n_imputations * poisson_log_lumpf( reported_imputed[draw,t,1:(1+min(T-t,D))] | expected_overall_log);
+      target += 1.0/n_imputations * poisson_log_lupmf( reported_imputed[draw,t,1:(1+min(T-t,D))] | expected_overall_log);
       }
     }
   }

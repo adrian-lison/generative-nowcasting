@@ -45,7 +45,11 @@ data {
 transformed data {
   array[n_imputations, T, D+1] int reported_imputed;
   for (i in 1:n_imputations) {
-    reported_imputed[i,,] = reported_known + reported_unknown_imputed[i,,];
+    for (t in 1:T) {
+      for (d in 1:(D+1)) {
+        reported_imputed[i,t,d] = reported_known[t,d] + reported_unknown_imputed[i,t,d];
+      }
+    }
   }
 }
 
@@ -54,11 +58,9 @@ parameters {
   real<lower=0,upper=1> ets_alpha[ets_alpha_fixed < 0 ? 1 : 0]; // smoothing parameter for the level
   real<lower=0,upper=1> ets_beta[ets_beta_fixed < 0 ? 1 : 0]; // smoothing parameter for the trend
   real<lower=0,upper=1> ets_phi[ets_phi_fixed < 0 ? 1 : 0]; // dampening parameter of the trend
-  real lambda_log_level_start; // starting value of the level
-  real lambda_log_trend_start; // starting value of the trend
-  real lambda_log_2nd_trend_start[ets_diff ? 1 : 0];
-  vector[ets_diff ? n_lambda_pre+T-2 : n_lambda_pre+T-1] lambda_log_raw; // nuisance parameter for non-centered parameterization
-  real<lower=0> lambda_log_sd;
+  vector[2+ets_diff] lambda_log_start_values; // starting value of the level, trend [, and curvature if diff]
+  real<lower=0> lambda_log_sd; // standard deviation of process noise
+  vector<multiplier=(ets_noncentered ? lambda_log_sd : 1)>[n_lambda_pre+T-1-ets_diff] lambda_log_noise; // process noise
   
   // reporting delay model parameters
 #include parameters/reporting_delay.stan
@@ -82,20 +84,13 @@ transformed parameters {
   
   // occurrence process
   // AR(1) process on log scale
-  if (ets_diff) {
-    lambda_log = diff_holt_damped_process_noncentered(
-    lambda_log_level_start,
+  lambda_log = holt_damped_process(
+    lambda_log_start_values,
     ets_alpha_fixed < 0 ? ets_alpha[1] : ets_alpha_fixed,
     ets_beta_fixed < 0 ? ets_beta[1] : ets_beta_fixed,
     ets_phi_fixed < 0 ? ets_phi[1] : ets_phi_fixed,
-    lambda_log_trend_start, lambda_log_2nd_trend_start[1], lambda_log_raw*lambda_log_sd);
-  } else {
-    lambda_log =holt_damped_process(
-    ets_alpha_fixed < 0 ? ets_alpha[1] : ets_alpha_fixed,
-    ets_beta_fixed < 0 ? ets_beta[1] : ets_beta_fixed,
-    ets_phi_fixed < 0 ? ets_phi[1] : ets_phi_fixed,
-    lambda_log_level_start, lambda_log_trend_start, lambda_log_raw*lambda_log_sd);
-  }
+    lambda_log_noise,
+    ets_diff);
   
   // reporting delay model: hazards and probabilities
   {
@@ -128,13 +123,13 @@ model {
   if(ets_phi_fixed < 0) {
     ets_phi[1] ~ beta(ets_phi_prior_alpha[1],ets_phi_prior_beta[1]); // dampening needs a tight prior, roughly between 0.8 and 0.98
   }
-  lambda_log_sd ~ normal(lambda_log_sd_prior_mu,lambda_log_sd_prior_sd) T[0, ]; // truncated normal
-  lambda_log_level_start ~ normal(lambda_log_level_start_prior_mu,lambda_log_level_start_prior_sd); // starting prior for AR
-  lambda_log_trend_start ~ normal(lambda_log_trend_start_prior_mu,lambda_log_trend_start_prior_sd);
-  if (ets_diff) {
-    lambda_log_2nd_trend_start ~ normal(lambda_log_2nd_trend_start_prior_mu,lambda_log_2nd_trend_start_prior_sd);
+  lambda_log_start_values[1] ~ normal(lambda_log_level_start_prior_mu, lambda_log_level_start_prior_sd); // starting prior for AR
+  lambda_log_start_values[2] ~ normal(lambda_log_trend_start_prior_mu, lambda_log_trend_start_prior_sd);
+  if (ets_diff == 1) {
+    lambda_log_start_values[3] ~ normal(lambda_log_2nd_trend_start_prior_mu, lambda_log_2nd_trend_start_prior_sd);
   }
-  lambda_log_raw ~ std_normal(); // non-centered
+  lambda_log_sd ~ normal(lambda_log_sd_prior_mu, lambda_log_sd_prior_sd) T[0, ]; // truncated normal
+  lambda_log_noise ~ normal(0, lambda_log_sd); // Gaussian noise
 
   // Likelihood
   {

@@ -12,6 +12,7 @@
 ## ----------------------------------------------------------------
 
 summarize_fit <- function(fitted_model,
+                          output_def,
                           model_type,
                           start_date,
                           now,
@@ -30,7 +31,7 @@ summarize_fit <- function(fitted_model,
   
   if (model_type == "impute") {
     fit_summary[["mu"]] <- fitted_model$summary("mu", c("median", "quantile2")) %>% 
-    transmute(date = (1:n())+D, mu = median, .lower = q5, .upper = q95, .width = factor(0.95)) %>% 
+    transmute(date = (1:n())+stan_data_list[["D"]], mu = median, .lower = q5, .upper = q95, .width = factor(0.95)) %>% 
     mutate(date = recode(date, !!!seq(start_date, now, by = 1)))
     
     fit_summary[["imputed"]] <- fitted_model %>%
@@ -52,7 +53,7 @@ summarize_fit <- function(fitted_model,
     fit_summary[["max_gen"]] <- stan_data_list[["max_gen"]]
     
     fit_summary[["nowcast"]] <- summarize_nowcast(fitted_model, start_date, now)
-    fit_summary[["delays"]] <- summarize_p(fitted_model, start_date, now)
+    if(output_def$delays) fit_summary[["delays"]] <- summarize_p(fitted_model, start_date, now)
     fit_summary[["mean_delay"]] <- summarize_mean_delay(fitted_model, start_date, now)
     fit_summary[["fraction_complete"]] <- summarize_alpha(fitted_model, start_date, now)
     
