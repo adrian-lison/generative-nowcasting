@@ -60,8 +60,9 @@ if (file.exists(additional_data)) source(additional_data)
 ## ---------------------------------------------------------------
 
 source(here::here("code", "utils", "utils.R"))
-source(here::here("code", "utils", "utils_prep_stan.R"))
+source(here::here("code", "utils", "cmdstan_model_optional_profiling.R"))
 source(here::here("code", "utils", "utils_summarize.R"))
 source(here::here("code", "utils", "utils_plot.R"))
+source(here::here("code", "utils", "utils_validate.R"))
 
 source(here::here("code", "make_nowcast.R"))

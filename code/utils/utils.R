@@ -117,7 +117,24 @@ get_generation_dist <- function(gamma_mean = 4.8, gamma_sd = 2.3, maxGen = 10) {
   return(probs)
 }
 
-get_discrete_lognormal <- function(meanlog, sdlog, maxX) {
+get_discrete_gamma <- function(gamma_mean, gamma_sd, maxX) {
+  gamma_shape <- (gamma_mean / gamma_sd)^2
+  gamma_rate <- gamma_mean / (gamma_sd^2)
+  # longest period (combines all periods >= maxX)
+  longest <- (1 - pgamma(maxX, shape = gamma_shape, rate = gamma_rate))
+  probs <- c(
+    ddgamma(0:(maxX - 1), shape = gamma_shape, rate = gamma_rate), # all except longest (discrete)
+    longest
+  )
+  return(probs)
+}
+
+get_discrete_lognormal <- function(meanlog, sdlog, maxX, unit_mean = NULL, unit_sd = NULL) {
+  if (!is.null(unit_mean) && !is.null(unit_sd)) {
+    sigma2 <- log((unit_sd / unit_mean)^2 + 1)
+    meanlog <- log(unit_mean) - sigma2 / 2
+    sdlog <- sqrt(sigma2)
+  }
   longest <- (1 - plnorm(maxX, meanlog = meanlog, sdlog = sdlog))
   probs <- c(
     sapply(0:(maxX - 1), function(x) plnorm(x + 1, meanlog = meanlog, sdlog = sdlog) - plnorm(x, meanlog = meanlog, sdlog = sdlog)), # all except longest (discrete)
@@ -176,85 +193,4 @@ holt_damped_process_noncentered <- function(alpha, beta_star, phi, l_start, b_st
   y <- l_start + alpha * cumsum(c(0, increments))[1:n] + sum_b + increments
 
   return(y)
-}
-
-## ---------------------------------------------------------------
-##                        Cmdstanr functions                     -
-## ---------------------------------------------------------------
-
-#' Remove profiling statements from a character vector representing stan code
-#'
-#' @param s Character vector representing stan code
-#'
-#' @return A `character` vector of the stan code without profiling statements
-remove_profiling <- function(s) {
-  while (grepl("profile\\(.+\\)\\s*\\{", s, perl = TRUE)) {
-    s <- gsub(
-      "profile\\(.+\\)\\s*\\{((?:[^{}]++|\\{(?1)\\})++)\\}", "\\1", s,
-      perl = TRUE
-    )
-  }
-  return(s)
-}
-
-#' Write copies of the .stan files of a Stan model and its #include files
-#' with all profiling statements removed.
-#'
-#' @param stan_file The path to a .stan file containing a Stan program.
-#'
-#' @param include_paths Paths to directories where Stan should look for files
-#' specified in #include directives in the Stan program.
-#'
-#' @param target_dir The path to a directory in which the manipulated .stan
-#' files without profiling statements should be stored. To avoid overriding of
-#' the original .stan files, this should be different from the directory of the
-#' original model and the `include_paths`.
-#'
-#' @return A `list` containing the path to the .stan file without profiling
-#' statements and the include_paths for the included .stan files without
-#' profiling statements
-write_stan_files_no_profile <- function(stan_file, include_paths = NULL,
-                                        target_dir = tempdir()) {
-  # remove profiling from main .stan file
-  code_main_model <- paste(readLines(stan_file, warn = FALSE), collapse = "\n")
-  code_main_model_no_profile <- remove_profiling(code_main_model)
-  if (!dir.exists(target_dir)) {
-    dir.create(target_dir, recursive = T)
-  }
-  main_model <- cmdstanr::write_stan_file(
-    code_main_model_no_profile,
-    dir = target_dir,
-    basename = basename(stan_file)
-  )
-
-  # remove profiling from included .stan files
-  include_paths_no_profile <- rep(NA, length(include_paths))
-  for (i in length(include_paths)) {
-    include_paths_no_profile[i] <- file.path(
-      target_dir, paste0("include_", i), basename(include_paths[i])
-    )
-    include_files <- list.files(
-      include_paths[i],
-      pattern = "*.stan", recursive = TRUE
-    )
-    for (f in include_files) {
-      include_paths_no_profile_fdir <- file.path(
-        include_paths_no_profile[i], dirname(f)
-      )
-      code_include <- paste(
-        readLines(file.path(include_paths[i], f), warn = FALSE),
-        collapse = "\n"
-      )
-      code_include_paths_no_profile <- remove_profiling(code_include)
-      if (!dir.exists(include_paths_no_profile_fdir)) {
-        dir.create(include_paths_no_profile_fdir, recursive = T)
-      }
-      cmdstanr::write_stan_file(
-        code_include_paths_no_profile,
-        dir = include_paths_no_profile_fdir,
-        basename = basename(f)
-      )
-    }
-  }
-  return(list(model = main_model, include_paths = include_paths_no_profile))
 }
