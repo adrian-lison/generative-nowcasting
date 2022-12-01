@@ -31,6 +31,8 @@ data {
   
   // include priors/settings for exponential smoothing
 #include data/data_ets.stan
+  int<lower=0> ts_model; 
+  int<lower=0> sma_window;
   
   real R_sd_prior_mu;
   real<lower=0> R_sd_prior_sd;
@@ -58,14 +60,16 @@ transformed data {
 }
 
 parameters {
-  // exponential smoothing / innovations state space process for log(R)
-  array[ets_alpha_fixed < 0 ? 1 : 0] real<lower=0,upper=1> ets_alpha; // smoothing parameter for the level
-  array[ets_beta_fixed < 0 ? 1 : 0] real<lower=0,upper=1> ets_beta; // smoothing parameter for the trend
-  array[ets_phi_fixed < 0 ? 1 : 0] real<lower=0,upper=1> ets_phi; // dampening parameter of the trend
+  // log(R) time series prior
   real R_level_start; // starting value of the level
   real R_trend_start; // starting value of the trend
   real<lower=0> R_sd; // standard deviation of additive errors
-  vector<multiplier=(ets_noncentered? R_sd : 1)>[L+n_lambda_pre+T-max_gen-1] R_noise; // additive errors
+  vector<multiplier=(ts_model > 0 ? (ets_noncentered ? R_sd : 1) : 1)>[L+n_lambda_pre+T-max_gen-1] R_noise; // additive errors
+  
+  // exponential smoothing / innovations state space process for log(R)
+  array[ts_model == 1 ? (ets_alpha_fixed < 0 ? 1 : 0) : 0] real<lower=0,upper=1> ets_alpha; // smoothing parameter for the level
+  array[ts_model == 1 ? (ets_beta_fixed < 0 ? 1 : 0) : 0] real<lower=0,upper=1> ets_beta; // smoothing parameter for the trend
+  array[ts_model == 1 ? (ets_phi_fixed < 0 ? 1 : 0) : 0] real<lower=0,upper=1> ets_phi; // dampening parameter of the trend
   
   // random walk parameters for alpha
   real alpha_logit_start;
@@ -111,12 +115,18 @@ transformed parameters {
   // Smoothing prior for R
   // ETS/Innovations state space process on log scale, starting value 1 on unit scale
   profile ("transformed_R") {
-  R = softplus(holt_damped_process(
-    [R_level_start, R_trend_start]',
-    ets_alpha_fixed < 0 ? ets_alpha[1] : ets_alpha_fixed,
-    ets_beta_fixed < 0 ? ets_beta[1] : ets_beta_fixed,
-    ets_phi_fixed < 0 ? ets_phi[1] : ets_phi_fixed,
-    R_noise, 0), 4);
+  if (ts_model == 0) {
+    R = softplus(append_row(R_level_start, R_noise), 4);
+  } else if (ts_model == 1) {
+    R = softplus(holt_damped_process(
+      [R_level_start, R_trend_start]',
+      ets_alpha_fixed < 0 ? ets_alpha[1] : ets_alpha_fixed,
+      ets_beta_fixed < 0 ? ets_beta[1] : ets_beta_fixed,
+      ets_phi_fixed < 0 ? ets_phi[1] : ets_phi_fixed,
+      R_noise, 0), 4);
+  } else if (ts_model == 2) {
+    R = softplus(simple_ma([R_level_start, R_trend_start]', R_noise, sma_window, 0), 4);
+  }
   }
   
   // latent event process (convolution) / renewal equation
@@ -165,19 +175,26 @@ model {
   // or phi_negbinom ~ inv_gamma(0.01, 0.01);
   
   // ETS/Innovations state space process prior for log R
-  if(ets_alpha_fixed < 0) {
-    ets_alpha[1] ~ beta(ets_alpha_prior_alpha[1], ets_alpha_prior_beta[1]); 
+  if (ts_model == 1) {
+    if(ets_alpha_fixed < 0) {
+      ets_alpha[1] ~ beta(ets_alpha_prior_alpha[1], ets_alpha_prior_beta[1]); 
+    }
+    if(ets_beta_fixed < 0) {
+      ets_beta[1] ~ beta(ets_beta_prior_alpha[1], ets_beta_prior_beta[1]); 
+    }
+    if(ets_phi_fixed < 0) {
+      ets_phi[1] ~ beta(ets_phi_prior_alpha[1], ets_phi_prior_beta[1]); // dampening needs a tight prior, roughly between 0.8 and 0.98
+    }
   }
-  if(ets_beta_fixed < 0) {
-    ets_beta[1] ~ beta(ets_beta_prior_alpha[1], ets_beta_prior_beta[1]); 
+  if (ts_model == 0) {
+    R_level_start ~ normal(R_level_start_prior_mu, R_level_start_prior_sd); // starting prior for level
+    R_noise ~ normal(R_level_start_prior_mu, R_level_start_prior_sd); // independent sampling
+  } else {
+    R_level_start ~ normal(R_level_start_prior_mu, R_level_start_prior_sd); // starting prior for level
+    R_trend_start ~ normal(R_trend_start_prior_mu, R_trend_start_prior_sd); // starting prior for trend
+    R_sd ~ normal(R_sd_prior_mu, R_sd_prior_sd) T[0, ]; // truncated normal
+    R_noise ~ normal(0, R_sd); // Gaussian noise
   }
-  if(ets_phi_fixed < 0) {
-    ets_phi[1] ~ beta(ets_phi_prior_alpha[1], ets_phi_prior_beta[1]); // dampening needs a tight prior, roughly between 0.8 and 0.98
-  }
-  R_level_start ~ normal(R_level_start_prior_mu, R_level_start_prior_sd); // starting prior for level
-  R_trend_start ~ normal(R_trend_start_prior_mu, R_trend_start_prior_sd); // starting prior for trend
-  R_sd ~ normal(R_sd_prior_mu, R_sd_prior_sd) T[0, ]; // truncated normal
-  R_noise ~ normal(0, R_sd); // Gaussian noise
   
   // latent event realizations
   iota_log_ar_start ~ normal(iota_log_ar_start_prior_mu, iota_log_ar_start_prior_sd);
