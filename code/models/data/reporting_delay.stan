@@ -16,6 +16,9 @@ Data and prior information for reporting delay model
   // note: a prior centered at zero assumes that the delay stays constant
   array[n_beta] real beta_prior_mu;
   array[n_beta] real<lower=0> beta_prior_sd;
+  int<lower=0,upper=1> beta_random;
+  array[beta_random] real beta_sd_prior_mu;
+  array[beta_random] real<lower=0> beta_sd_prior_sd;
 
   // reporting day effects / additional covariates
   int n_eta; // number of reporting day / covariate effects

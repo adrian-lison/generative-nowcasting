@@ -6,12 +6,12 @@ Functions for converting between different types of reporting triangles
   * Takes a reporting triangle by date of reference, and reshapes it into a
   * reporting triangle by date of report, excluding left-truncated dates.
   *
-  * @param triangle DxT matrix representing a reporting triangle, i.e. columns
+  * @param triangle (D+1)xT matrix representing a reporting triangle, i.e. columns
   * represent the date of reference and rows represent the delay
   * 
   * @param D maximum delay
   * 
-  * @return A Dx(T-D) matrix representing a reporting triangle by date
+  * @return A (D+1)x(T-D) matrix representing a reporting triangle by date
   * of report. Columns represent the date of report (since first day that is
   * not left-truncated) and rows represent the delay.
   */
@@ -25,6 +25,30 @@ Functions for converting between different types of reporting triangles
     }
     return triangle_rep;
   }
+
+/**
+  * Takes a reporting triangle by date of reference, and reshapes it into a
+  * reporting triangle by date of report, excluding left-truncated dates.
+  *
+  * @param triangle Tx(D+1) array representing a reporting triangle, i.e. rows
+  * represent the date of reference and columns represent the delay
+  * 
+  * @param D maximum delay
+  * 
+  * @return A (T-D)x(D+1) array representing a reporting triangle by date
+  * of report. Rows represent the date of report (since first day that is
+  * not left-truncated) and columns represent the delay.
+  */  
+  array[,] int reporting_triangle_by_report(array[,] int triangle, int D){
+    int T_all = dims(triangle)[1];
+    array[T_all-D, D+1] int triangle_rep = rep_array(0, T_all-D, D+1);
+    for (t in 1:T_all) { // iterating over reference dates
+      for (d in (max(1, D-t+2)):min(D+1, T_all-t+1)) { // iterating over delays
+        triangle_rep[t+d-1-D, d] = triangle[t, d];
+      }
+    }
+    return triangle_rep;
+  }
   
   /** Takes a reporting triangle by date of reference, and reshapes it into a
   * padded reporting triangle by date of report, excluding left-truncated dates.
@@ -33,7 +57,7 @@ Functions for converting between different types of reporting triangles
   * the dimensions and orientation of the returned matrix are different from the
   * non-optimized version.
   *
-  * @param triangle DxT matrix representing a reporting triangle, i.e. columns
+  * @param triangle (D+1)xT matrix representing a reporting triangle, i.e. columns
   * represent the date of reference and rows represent the delay
   * 
   * @param D maximum delay

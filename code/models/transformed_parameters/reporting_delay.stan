@@ -1,7 +1,7 @@
 /** ---------------------------------------------------------------------------
 Reporting delay model
 ---------------------------------------------------------------------------- */
-  // temp variables for hazard conputation
+  // temp variables for hazard computation
     real contrib_occurrence_covariates;
     vector[n_delays] logit_haz_interval;
     vector[D] hazard;

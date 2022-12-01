@@ -3,7 +3,7 @@ Time series process functions
 ---------------------------------------------------------------------------- */
  
   /**
-  * Non-centered and vectorized AR(1) process
+  * Non-centered and vectorized AR(1) process with coefficient of 1
   * Note that if the first value of the process is already included in the
   * increments_standardized vector, then you can provide a start_value = 0
   */
@@ -11,12 +11,34 @@ Time series process functions
   
   vector random_walk(vector start_values, vector increments, int diff_order) {
     if (diff_order == 0) {
-       return start_values[1] + cumulative_sum(append_row(0, increments));
+       return cumulative_sum(append_row(start_values[1], increments));
      } else {
       vector[diff_order] next_start = start_values[2:(diff_order+1)];
       int next_n = num_elements(increments) + diff_order - 1;
       vector[next_n] diffs = random_walk(next_start, increments, diff_order - 1);
-      return start_values[1] + cumulative_sum(append_row(0, diffs));
+      return cumulative_sum(append_row(start_values[1], diffs));
+    }
+  }
+  
+  /**
+  * Non-centered and vectorized MA(q) process with all coefficients = 1
+  * Note that if the first value of the process is already included in the
+  * increments_standardized vector, then you can provide a start_value = 0
+  */
+  vector simple_ma(vector start_values, vector increments, int Q, int diff_order);
+  
+  vector simple_ma(vector start_values, vector increments, int Q, int diff_order) {
+    if (diff_order == 0) {
+      int n = num_elements(increments)+1;
+      vector[n] normal_cumsum = cumulative_sum(append_row(0, increments));
+      vector[n] lagged_cumsum = cumulative_sum(append_row(rep_vector(0, Q+2), increments))[1:n];
+      vector[n] window_sum = normal_cumsum - lagged_cumsum;
+      return start_values[1] + window_sum; // start_value represents mean here
+     } else {
+      vector[diff_order] next_start = start_values[2:(diff_order+1)];
+      int next_n = num_elements(increments) + diff_order - 1;
+      vector[next_n] diffs = simple_ma(next_start, increments, Q, diff_order - 1);
+      return cumulative_sum(append_row(start_values[1], diffs));
     }
   }
   
@@ -55,6 +77,6 @@ Time series process functions
       vector[diff_order+1] next_start = start_values[2:(diff_order+2)];
       int next_n = num_elements(noise) + diff_order;
       vector[next_n] diffs = holt_damped_process(next_start, alpha, beta_star, phi, noise, diff_order - 1);
-      return start_values[1] + cumulative_sum(append_row(0, diffs));
+      return cumulative_sum(append_row(start_values[1], diffs));
     }
   }

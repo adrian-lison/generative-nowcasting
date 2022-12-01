@@ -1,7 +1,7 @@
 /** ---------------------------------------------------------------------------
 Generated quantities for nowcast
 ---------------------------------------------------------------------------- */
-  array[T] int nowcast_known;
+  array[T] int nowcast_all;
 
   {
     int draw = discrete_range_rng(1, n_imputations);
@@ -22,6 +22,6 @@ Generated quantities for nowcast
       }
       
       // sum all events to the respective occurrence date
-      nowcast_known[t] = sum(nT_known);
+      nowcast_all[t] = sum(nT_known);
     }
   }
