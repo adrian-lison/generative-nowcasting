@@ -138,23 +138,23 @@ default_inits <- function(stan_data_list, model_type) {
     inits[["xi_negbinom"]] <- max(stan_data_list$xi_negbinom_prior_mu + stan_data_list$xi_negbinom_prior_sd / 2, 1e-4)
 
     if (model_type %in% c("base", "base_old", "nowcast_imputed")) {
-      inits[["lambda_log_start_values"]] <- c(log(stan_data_list$expected_cases_start), rep(0, 1 + stan_data_list$ets_diff))
+      inits[["lambda_log_start_values"]] <- c(log(max(stan_data_list$expected_cases_start,1e-4)), rep(0, 1 + stan_data_list$ets_diff))
       inits[["lambda_log_noise"]] <- rep(0, stan_data_list$T + stan_data_list$n_lambda_pre - 1 - stan_data_list$ets_diff) # rnorm(n = stan_data_list$T + stan_data_list$n_lambda_pre - 1)
       inits[["lambda_log_sd"]] <- max(stan_data_list$lambda_log_sd_prior_mu + stan_data_list$lambda_log_sd_prior_sd / 2, 1e-4) # rtnorm(n = 1, stan_data_list$lambda_log_sd_prior_mu, sd = stan_data_list$lambda_log_sd_prior_sd / 4, a = 0) # truncated
     }
 
     inits[["ets_alpha"]] <- 1 - 1e-4 # rbeta(n = 1, stan_data_list$ets_alpha_prior_alpha, stan_data_list$ets_alpha_prior_beta)
     inits[["ets_beta"]] <- 1 - 1e-4 # rbeta(n = 1, stan_data_list$ets_beta_prior_alpha, stan_data_list$ets_beta_prior_beta)
-    inits[["ets_phi"]] <- 1 - 1e-4 # rbeta(n = 1, stan_data_list$ets_phi_prior_alpha, stan_data_list$ets_phi_prior_beta)
+    inits[["ets_phi"]] <- 1e-4 # rbeta(n = 1, stan_data_list$ets_phi_prior_alpha, stan_data_list$ets_phi_prior_beta)
 
     inits[["R_level_start"]] <- R_emp[stan_data_list$max_gen + 1] # rtnorm(n = 1, mean = stan_data_list$R_level_start_prior_mu, sd = stan_data_list$R_level_start_prior_sd / 4, a = 0) # truncated
     inits[["R_trend_start"]] <- 1e-4 # rnorm(n = 1, mean = stan_data_list$R_trend_start_prior_mu, sd = stan_data_list$R_trend_start_prior_sd / 4)
     inits[["R_sd"]] <- 1
     inits[["R_noise"]] <- rep(0, stan_data_list$L + stan_data_list$n_lambda_pre + stan_data_list$T - stan_data_list$max_gen - 1) # c(0, diff(R_emp))[(stan_data_list$max_gen + 2):(stan_data_list$L + stan_data_list$n_lambda_pre + stan_data_list$T)]
     # use initial expected cases as proxy for infections / expected infections
-    inits[["iota_log_ar_start"]] <- log(I_by_reference_date[1])
+    inits[["iota_log_ar_start"]] <- log(max(I_by_reference_date[1],1e-4))
     inits[["iota_log_ar_sd"]] <- 1
-    inits[["iota_log_ar_noise"]] <- c(0, diff(log(I_by_reference_date))[1:(stan_data_list$max_gen - 1)])
+    inits[["iota_log_ar_noise"]] <- c(0, diff(log(pmax(I_by_reference_date,1e-4)))[1:(stan_data_list$max_gen - 1)])
     inits[["I"]] <- I_by_reference_date + 0.1
     return(inits)
   }
