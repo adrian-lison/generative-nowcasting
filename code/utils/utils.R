@@ -117,15 +117,47 @@ get_generation_dist <- function(gamma_mean = 4.8, gamma_sd = 2.3, maxGen = 10) {
   return(probs)
 }
 
-get_discrete_gamma <- function(gamma_mean, gamma_sd, maxX) {
-  gamma_shape <- (gamma_mean / gamma_sd)^2
-  gamma_rate <- gamma_mean / (gamma_sd^2)
+get_discrete_gamma <- function(gamma_shape,
+                               gamma_scale,
+                               gamma_rate,
+                               gamma_mean,
+                               gamma_sd,
+                               maxX,
+                               include_zero = T) {
+  if (missing(gamma_shape)) {
+    if (missing(gamma_mean) || missing(gamma_sd)) {
+      stop("No valid combination of parameters supplied", call. = F)
+    }
+    gamma_shape <- (gamma_mean / gamma_sd)^2
+  }
+  if (missing(gamma_rate)) {
+    if (missing(gamma_scale)) {
+      if (missing(gamma_mean) || missing(gamma_sd)) {
+        stop("No valid combination of parameters supplied", call. = F)
+      }
+      gamma_rate <- gamma_mean / (gamma_sd^2)
+    } else {
+      gamma_rate <- 1 / gamma_scale
+    }
+  }
+  
+  # shortest period (combines periods 0 and 1)
+  shortest <- pgamma(2, shape = gamma_shape, rate = gamma_rate)
   # longest period (combines all periods >= maxX)
   longest <- (1 - pgamma(maxX, shape = gamma_shape, rate = gamma_rate))
-  probs <- c(
-    ddgamma(0:(maxX - 1), shape = gamma_shape, rate = gamma_rate), # all except longest (discrete)
-    longest
-  )
+  
+  if (include_zero) {
+    probs <- c(
+      ddgamma(0:(maxX - 1), shape = gamma_shape, rate = gamma_rate), # all except longest (discrete)
+      longest
+    )
+  } else {
+    probs <- c(
+      shortest,
+      ddgamma(2:(maxX - 1), shape = gamma_shape, rate = gamma_rate), # all other (discrete)
+      longest
+    )
+  }
   return(probs)
 }
 
