@@ -28,8 +28,6 @@ define_results <- function(file_pattern, result_folder, result_subfolder, result
   files_output <- data.frame(output_file = list.files(path = result_path, pattern = outputfile_pattern, full.names = T))
   files_output$id <- str_extract(files_output$output_file, extract_output_id_pattern)
 
-  if (any(duplicated(files_output$id))) warning("There are duplicated IDs in the output files.")
-
   results <- files_result %>%
     full_join(files_output, by = "id")
 
@@ -64,6 +62,9 @@ define_results <- function(file_pattern, result_folder, result_subfolder, result
     relocate(id, dataset_index, date_index, now, maxDelay, .before = 1) %>%
     mutate(across(c(id, dataset_index, date_index), as.integer)) %>%
     arrange(id)
+  
+  if (any(duplicated(files_output$id))) warning("There are duplicated IDs in the output files.")
+  results <- results %>% arrange(desc(output_file)) %>% dplyr::distinct(across(-output_file)) #take the version with the latest output file
 
   return(results)
 }
@@ -78,13 +79,28 @@ define_result_list <- function(result_folder, result_info = T, ...) {
   return(res_list)
 }
 
-load_results_sim <- function(res_list, ground_truth_sim_list, maxDelay, reference_date) {
-  return(lapply(res_list, function(res) {
-    get_nowcasts(res) %>%
-      add_ground_truth_simulated(ground_truth_sim_list, maxDelay, reference_date) %>%
-      add_performance() %>%
-      add_consistency()
-  }))
+load_results_sim <- function(res_list, maxDelay, reference_date, ground_truth_sim_list, keep_posterior = TRUE, include_naive_nowcasts = TRUE, include_consistency = TRUE) {
+  results_sim <- lapply(1:length(res_list), function(i) {
+    print(names(res_list)[i])
+    res <- get_nowcasts(res_list[[i]], maxDelay, reference_date, ground_truth_sim = ground_truth_sim_list, keep_posterior = keep_posterior)
+
+    #print("Adding overall ground truth.")
+    #res <- res %>% add_ground_truth_simulated(ground_truth_sim_list, maxDelay, reference_date, full_join = T)
+    
+    if (include_naive_nowcasts) {
+      print("Including naive nowcasts")
+      res <- add_naive_nowcasts_simulated(res, ground_truth_sim_list, reference_date)
+    }
+    
+    if (include_consistency) {
+      print("Including consistency measures")
+      res <- add_consistency(res)
+    }
+    
+    return(res)
+  })
+  names(results_sim) <- names(res_list)
+  return(results_sim)
 }
 
 #' Get diagnostic information of each fit, along with some summaries
@@ -193,21 +209,24 @@ get_missing_dates <- function(results) {
 }
 
 #' Load all the nowcasting results from the files and store them in a common data.frame
-get_nowcasts <- function(results) {
-  bind_rows(apply(results, 1, function(res) {
+get_nowcasts <- function(results, maxDelay, reference_date, ground_truth_sim = NULL, keep_posterior = TRUE) {
+  all_res <- apply(results, 1, function(res) {
+    gc()
+    
     if (is.na(res["result_file"]) | is.na(res["now"])) {
       return(data.frame(
         id = res["id"],
-        nowcast_date = res["now"],
+        nowcast_date = as.Date(res["now"]),
         dataset_index = res["dataset_index"],
         date_index = res["date_index"]
       ))
     }
+    #print(res["result_file"])
     nowcast_file <- read_rds(res["result_file"])
     if (!("summary" %in% names(nowcast_file))) {
       return(data.frame(
         id = res["id"],
-        nowcast_date = res["now"],
+        nowcast_date = as.Date(res["now"]),
         dataset_index = res["dataset_index"],
         date_index = res["date_index"]
       ))
@@ -316,7 +335,7 @@ get_nowcasts <- function(results) {
     }
     nc <- nc %>% left_join(bind_rows(nc_R_list, .id = "R_model"), by = c("R_model", "date"))
     remove(nc_R_list)
-
+    
     # add identifiers
     nc <- nc %>%
       mutate(
@@ -325,11 +344,30 @@ get_nowcasts <- function(results) {
         dataset_index = res["dataset_index"],
         date_index = res["date_index"],
         .before = date
-      )
+      ) %>%
+      mutate(nowcast_date = as.Date(nowcast_date),
+             delay = nowcast_date - date,
+             .before = date) %>% 
+      mutate(across(where(is.character),trimws))
+    
+    # add ground truth
+    if(!(is.null(ground_truth_sim))) {
+      nc <- nc %>% add_ground_truth_simulated(ground_truth_sim, maxDelay, reference_date)
+    }
 
+    # add performance
+    nc <- nc %>% add_performance()
+    
+    # remove posterior if specified
+    if(!keep_posterior) {
+      nc <- nc %>% select(-contains("_posterior"))
+    }
     return(nc)
-  })) %>%
-    mutate(nowcast_date = as.Date(nowcast_date), delay = nowcast_date - date, .before = date)
+  })
+  #saveRDS(all_res, here::here("data","results","all_res_test.rds"), compress = F)
+  print("Merging all results.")
+  gc()
+  return(bind_rows(all_res))
 }
 
 #' Get "naive" nowcasts, i.e. just the (downward biased) count of cases observed until now
@@ -364,68 +402,76 @@ get_naive_nowcasts_empirical <- function(ground_truth_df, maxDelay) {
     return()
 }
 
-get_naive_nowcasts_simulated <- function(groundtruth_sim, maxDelay, reference_date) {
-  # known
-  ground_truth_agg <- groundtruth_sim$linelist %>%
-    filter(onset_known) %>%
-    group_by(onset_time, rep_time) %>%
-    count()
-
-  known_cases <- ground_truth_agg %>%
-    rename(date = onset_time) %>%
-    group_by(date) %>%
-    transmute(date = reference_date + date, nowcast_date = reference_date + rep_time, nowcast_known_naive = cumsum(n)) %>%
-    ungroup() %>%
-    complete(
-      date = seq.Date(min(date, na.rm = T),
-        max(nowcast_date, na.rm = T),
-        by = "1 day"
-      ),
-      nowcast_date = seq.Date(min(date, na.rm = T),
-        max(nowcast_date, na.rm = T),
-        by = "1 day"
-      )
-    ) %>%
-    filter(nowcast_date >= date) %>%
-    filter(nowcast_date <= date + maxDelay) %>%
-    arrange(date, nowcast_date) %>%
-    group_by(date) %>%
-    fill(nowcast_known_naive, .direction = "downup") %>%
-    mutate(nowcast_known_naive = na.fill(nowcast_known_naive, 0))
-
-  # all
-  ground_truth_agg <- groundtruth_sim$linelist %>%
-    group_by(onset_time, rep_time) %>%
-    count()
-
-  all_cases <- ground_truth_agg %>%
-    rename(date = onset_time) %>%
-    group_by(date) %>%
-    transmute(
-      date = reference_date + date, nowcast_date = reference_date + rep_time,
-      nowcast_all_naive = cumsum(n)
-    ) %>%
-    ungroup() %>%
-    complete(
-      date = seq.Date(min(date, na.rm = T),
-        max(nowcast_date, na.rm = T),
-        by = "1 day"
-      ),
-      nowcast_date = seq.Date(min(date, na.rm = T),
-        max(nowcast_date, na.rm = T),
-        by = "1 day"
-      )
-    ) %>%
-    filter(nowcast_date >= date) %>%
-    filter(nowcast_date <= date + maxDelay) %>%
-    arrange(date, nowcast_date) %>%
-    group_by(date) %>%
-    fill(nowcast_all_naive, .direction = "downup") %>%
-    mutate(nowcast_all_naive = na.fill(nowcast_all_naive, 0))
-
-  naive_result <- known_cases %>% full_join(all_cases, by = c("date", "nowcast_date"))
-
-  return(naive_result)
+add_naive_nowcasts_simulated <- function(nowcasts, ground_truth_sim_list, reference_date) {
+  # note: here we use the maximum delay (not the maximum modeled one) = time window on purpose
+  maxDelay <- max(nowcasts$delay, na.rm = T)
+  
+  naive_nowcasts <- bind_rows(lapply(ground_truth_sim_list, function(ground_truth_sim) {
+    # known
+    ground_truth_agg <- ground_truth_sim$linelist %>%
+      filter(onset_known) %>%
+      group_by(onset_time, rep_time) %>%
+      count()
+  
+    known_cases <- ground_truth_agg %>%
+      rename(date = onset_time) %>%
+      group_by(date) %>%
+      transmute(date = reference_date + date, nowcast_date = reference_date + rep_time, nowcast_known_naive = cumsum(n)) %>%
+      ungroup() %>%
+      complete(
+        date = seq.Date(min(date, na.rm = T),
+          max(nowcast_date, na.rm = T),
+          by = "1 day"
+        ),
+        nowcast_date = seq.Date(min(date, na.rm = T),
+          max(nowcast_date, na.rm = T),
+          by = "1 day"
+        )
+      ) %>%
+      filter(nowcast_date >= date) %>%
+      filter(nowcast_date <= date + maxDelay) %>%
+      arrange(date, nowcast_date) %>%
+      group_by(date) %>%
+      fill(nowcast_known_naive, .direction = "downup") %>%
+      mutate(nowcast_known_naive = na.fill(nowcast_known_naive, 0))
+  
+    # all
+    ground_truth_agg <- ground_truth_sim$linelist %>%
+      group_by(onset_time, rep_time) %>%
+      count()
+  
+    all_cases <- ground_truth_agg %>%
+      rename(date = onset_time) %>%
+      group_by(date) %>%
+      transmute(
+        date = reference_date + date, nowcast_date = reference_date + rep_time,
+        nowcast_all_naive = cumsum(n)
+      ) %>%
+      ungroup() %>%
+      complete(
+        date = seq.Date(min(date, na.rm = T),
+          max(nowcast_date, na.rm = T),
+          by = "1 day"
+        ),
+        nowcast_date = seq.Date(min(date, na.rm = T),
+          max(nowcast_date, na.rm = T),
+          by = "1 day"
+        )
+      ) %>%
+      filter(nowcast_date >= date) %>%
+      filter(nowcast_date <= date + maxDelay) %>%
+      arrange(date, nowcast_date) %>%
+      group_by(date) %>%
+      fill(nowcast_all_naive, .direction = "downup") %>%
+      mutate(nowcast_all_naive = na.fill(nowcast_all_naive, 0))
+  
+    naive_result <- known_cases %>% full_join(all_cases, by = c("date", "nowcast_date"))
+    return(naive_result)
+  }), .id = "dataset_index")
+  
+  nowcasts <- nowcasts %>%
+    left_join(naive_nowcasts, by = c("nowcast_date", "date", "dataset_index"))
+  return(nowcasts)
 }
 
 #' Adds a "ground truth" from consolidated, empirical data,
@@ -463,22 +509,22 @@ add_ground_truth_empirical <- function(nowcasts, ground_truth, maxDelay) {
   return(nowcasts)
 }
 
-add_ground_truth_simulated <- function(nowcasts, groundtruth_sim_list, maxDelay, reference_date) {
+add_ground_truth_simulated <- function(nowcasts, ground_truth_sim_list, maxDelay, reference_date, full_join = F) {
   mindate <- min(nowcasts$date, na.rm = T)
   maxdate <- max(nowcasts$date, na.rm = T)
 
-  nowcast_true <- bind_rows(lapply(groundtruth_sim_list, function(groundtruth_sim) {
+  nowcast_true <- bind_rows(lapply(ground_truth_sim_list, function(ground_truth_sim) {
     data.frame(
-      date = reference_date + groundtruth_sim[["process_summary"]]$t,
-      nowcast_known_true = groundtruth_sim[["process_summary"]]$onsets_observed,
-      nowcast_unknown_true = groundtruth_sim[["process_summary"]]$onsets_hospitalized - groundtruth_sim[["process_summary"]]$onsets_observed,
-      nowcast_all_true = groundtruth_sim[["process_summary"]]$onsets_hospitalized,
-      R_true = groundtruth_sim[["parameters"]]$R
+      date = reference_date + ground_truth_sim[["process_summary"]]$t,
+      nowcast_known_true = ground_truth_sim[["process_summary"]]$onsets_observed,
+      nowcast_unknown_true = ground_truth_sim[["process_summary"]]$onsets_hospitalized - ground_truth_sim[["process_summary"]]$onsets_observed,
+      nowcast_all_true = ground_truth_sim[["process_summary"]]$onsets_hospitalized,
+      R_true = ground_truth_sim[["parameters"]]$R
     )
   }), .id = "dataset_index")
 
-  missing_rep_true <- bind_rows(lapply(groundtruth_sim_list, function(groundtruth_sim) {
-    groundtruth_sim$linelist %>%
+  missing_rep_true <- bind_rows(lapply(ground_truth_sim_list, function(ground_truth_sim) {
+    ground_truth_sim$linelist %>%
       filter(!onset_known) %>%
       mutate(rep_time = reference_date + rep_time) %>%
       filter(
@@ -488,32 +534,33 @@ add_ground_truth_simulated <- function(nowcasts, groundtruth_sim_list, maxDelay,
       count(rep_time, name = "missing_rep_true")
   }), .id = "dataset_index")
 
-  # note: here we use the maximum delay (not the maximum modeled one) = time window on purpose
-  naive_nowcasts <- bind_rows(lapply(groundtruth_sim_list, function(groundtruth_sim) {
-    get_naive_nowcasts_simulated(groundtruth_sim, max(nowcasts$delay, na.rm = T), reference_date)
-  }), .id = "dataset_index")
-
-  mean_delay_true <- bind_rows(lapply(groundtruth_sim_list, function(groundtruth_sim) {
+  mean_delay_true <- bind_rows(lapply(ground_truth_sim_list, function(ground_truth_sim) {
     data.frame(
-      date = reference_date + groundtruth_sim[["process_summary"]]$t_onset,
-      mean_delay_true = dist_get_mean(groundtruth_sim[["parameters"]]$symp_to_rep_dist[groundtruth_sim[["process_summary"]]$t_onset, ])
+      date = reference_date + ground_truth_sim[["process_summary"]]$t_onset,
+      mean_delay_true = dist_get_mean(ground_truth_sim[["parameters"]]$symp_to_rep_dist[ground_truth_sim[["process_summary"]]$t_onset, ])
     )
   }), .id = "dataset_index")
 
-  alpha_true <- bind_rows(lapply(groundtruth_sim_list, function(groundtruth_sim) {
+  alpha_true <- bind_rows(lapply(ground_truth_sim_list, function(ground_truth_sim) {
     data.frame(
-      date = reference_date + groundtruth_sim[["process_summary"]]$t_onset,
-      alpha_true = groundtruth_sim[["parameters"]]$onset_known_prob[groundtruth_sim[["process_summary"]]$t_onset]
+      date = reference_date + ground_truth_sim[["process_summary"]]$t_onset,
+      alpha_true = ground_truth_sim[["parameters"]]$onset_known_prob[ground_truth_sim[["process_summary"]]$t_onset]
     )
   }), .id = "dataset_index")
 
+  if (full_join) {
+    join_f <- dplyr::full_join
+  } else {
+    join_f <- dplyr::left_join
+  }
+  
   nowcasts <- nowcasts %>%
-    full_join(nowcast_true, by = c("date", "dataset_index")) %>%
-    full_join(missing_rep_true, by = c("date" = "rep_time", "dataset_index")) %>%
-    full_join(mean_delay_true, by = c("date", "dataset_index")) %>%
-    full_join(alpha_true, by = c("date", "dataset_index")) %>%
-    left_join(naive_nowcasts, by = c("nowcast_date", "date", "dataset_index")) %>%
-    return(nowcasts)
+    join_f(nowcast_true, by = c("date", "dataset_index")) %>%
+    join_f(missing_rep_true, by = c("date" = "rep_time", "dataset_index")) %>%
+    join_f(mean_delay_true, by = c("date", "dataset_index")) %>%
+    join_f(alpha_true, by = c("date", "dataset_index"))
+  
+  return(nowcasts)
 }
 
 #' When validating on empirical data, we have no true R. As a proxy, we can use
@@ -551,14 +598,14 @@ add_performance <- function(nowcasts) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        crps_sample(y, dat)
+        crps_sample(y, matrix(dat,nrow=1))
       }
     })
     nowcasts$nowcast_known_logS <- mapply(dat = nowcasts$nowcast_known_posterior, y = nowcasts$nowcast_known_true, function(dat, y) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        logs_sample(y, dat)
+        logs_sample(y, matrix(dat,nrow=1))
       }
     })
   }
@@ -579,14 +626,14 @@ add_performance <- function(nowcasts) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        crps_sample(y, dat)
+        crps_sample(y, matrix(dat,nrow=1))
       }
     })
     nowcasts$nowcast_unknown_logS <- mapply(dat = nowcasts$nowcast_unknown_posterior, y = nowcasts$nowcast_unknown_true, function(dat, y) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        logs_sample(y, dat)
+        logs_sample(y, matrix(dat,nrow=1))
       }
     })
   }
@@ -607,14 +654,14 @@ add_performance <- function(nowcasts) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        crps_sample(y, dat)
+        crps_sample(y, matrix(dat,nrow=1))
       }
     })
     nowcasts$nowcast_all_logS <- mapply(dat = nowcasts$nowcast_all_posterior, y = nowcasts$nowcast_all_true, function(dat, y) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        logs_sample(y, dat)
+        logs_sample(y, matrix(dat,nrow=1))
       }
     })
   }
@@ -635,14 +682,14 @@ add_performance <- function(nowcasts) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        crps_sample(y, dat)
+        crps_sample(y, matrix(dat,nrow=1))
       }
     })
     nowcasts$missing_rep_logS <- mapply(dat = nowcasts$predicted_missing_rep_posterior, y = nowcasts$missing_rep_true, function(dat, y) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        logs_sample(y, dat)
+        logs_sample(y, matrix(dat,nrow=1))
       }
     })
   }
@@ -688,14 +735,14 @@ add_performance <- function(nowcasts) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        crps_sample(y, dat)
+        crps_sample(y, matrix(dat,nrow=1))
       }
     })
     nowcasts$R_logS <- mapply(dat = nowcasts$R_posterior, y = nowcasts$R_true, function(dat, y) {
       if (is.na(y) | is.null(dat)) {
         return(NA)
       } else {
-        logs_sample(y, dat)
+        logs_sample(y, matrix(dat,nrow=1))
       }
     })
   }
@@ -845,6 +892,7 @@ get_metrics <- function(nowcasts) {
       nowcast_known_interval_consistency = mean(1 - nowcast_known_any_viol, na.rm = T),
       nowcast_known_interval_consistency_full = 1 - sum(nowcast_known_any_viol > 0, na.rm = T) / sum(!is.na(nowcast_known_any_viol)),
       nowcast_known_mean_crps = mean(nowcast_known_crps, na.rm = T),
+      nowcast_known_mean_crps_scaled = mean(abs(nowcast_known_crps) / abs(nowcast_known_true), na.rm = T),
       nowcast_known_mean_logS = mean(nowcast_known_logS, na.rm = T),
       # nowcast unknown
       nowcast_unknown_MAE = mean(abs(nowcast_unknown_err), na.rm = T),
@@ -858,6 +906,7 @@ get_metrics <- function(nowcasts) {
       nowcast_unknown_interval_consistency = mean(1 - nowcast_unknown_any_viol, na.rm = T),
       nowcast_unknown_interval_consistency_full = 1 - sum(nowcast_unknown_any_viol > 0, na.rm = T) / sum(!is.na(nowcast_unknown_any_viol)),
       nowcast_unknown_mean_crps = mean(nowcast_unknown_crps, na.rm = T),
+      nowcast_unknown_mean_crps_scaled = mean(abs(nowcast_unknown_crps) / abs(nowcast_unknown_true), na.rm = T),
       nowcast_unknown_mean_logS = mean(nowcast_unknown_logS, na.rm = T),
       # nowcast all
       nowcast_all_MAE = mean(abs(nowcast_all_err), na.rm = T),
@@ -871,6 +920,7 @@ get_metrics <- function(nowcasts) {
       nowcast_all_interval_consistency = mean(1 - nowcast_all_any_viol, na.rm = T),
       nowcast_all_interval_consistency_full = 1 - sum(nowcast_all_any_viol > 0, na.rm = T) / sum(!is.na(nowcast_all_any_viol)),
       nowcast_all_mean_crps = mean(nowcast_all_crps, na.rm = T),
+      nowcast_all_mean_crps_scaled = mean(abs(nowcast_all_crps) / abs(nowcast_all_true), na.rm = T),
       nowcast_all_mean_logS = mean(nowcast_all_logS, na.rm = T),
       # missing rep
       missing_rep_MAE = mean(abs(missing_rep_err), na.rm = T),
@@ -878,6 +928,7 @@ get_metrics <- function(nowcasts) {
       missing_rep_mean_range = mean(missing_rep_range, na.rm = T),
       missing_rep_coverage = sum(missing_rep_within_interval, na.rm = T) / sum(!is.na(missing_rep_within_interval)),
       missing_rep_mean_crps = mean(missing_rep_crps, na.rm = T),
+      missing_rep_mean_crps_scaled = mean(abs(missing_rep_crps) / abs(missing_rep_true), na.rm = T),
       missing_rep_mean_logS = mean(missing_rep_logS, na.rm = T),
       # mean delay
       mean_delay_MAE = mean(abs(mean_delay_err), na.rm = T),
@@ -895,10 +946,10 @@ get_metrics <- function(nowcasts) {
       R_interval_consistency = mean(1 - R_any_viol, na.rm = T),
       R_interval_consistency_full = 1 - sum(R_any_viol > 0, na.rm = T) / sum(!is.na(R_any_viol)),
       R_mean_crps = mean(R_crps, na.rm = T),
+      R_mean_crps_scaled = mean(abs(R_crps) / abs(R_true), na.rm = T),
       R_mean_logS = mean(R_logS, na.rm = T),
       .groups = "drop"
     )
-
   metrics <- metrics %>% select(where(~ !all(is.na(.x))))
 
   return(metrics)
