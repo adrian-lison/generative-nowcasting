@@ -37,8 +37,8 @@ get_stanprep <- function(data_def, model_def, prior_def, sampling_def) {
     delay_idx = model_def[["delay_idx"]],
     delay_changepoint = model_def[["delay_changepoint"]],
     n_lambda_pre = model_def[["n_lambda_pre"]],
-    latent_delay_dist = get_incubation_dist(gamma_mean = 5.3, gamma_sd = 3.2, maxInc = 14),
-    generation_time_dist = get_generation_dist(gamma_mean = 4.8, gamma_sd = 2.3, maxGen = 10),
+    latent_delay_dist = prior_def[["latent_delay_dist"]],
+    generation_time_dist = prior_def[["generation_time_dist"]],
     reporting_proportion = prior_def[["reporting_proportion"]]
   )
 
@@ -63,7 +63,7 @@ get_stanprep <- function(data_def, model_def, prior_def, sampling_def) {
   stan_prep$stan_data_list[["ets_fixed"]] <- prior_def[["ets_fixed"]]
   priors <- prior_def[["get_priors"]](stan_prep$stan_data_list)
   stan_prep$additional_info[["priors"]] <- priors
-  stan_prep$stan_data_list <- append(stan_prep$stan_data_list, flatten(priors))
+  stan_prep$stan_data_list <- append(stan_prep$stan_data_list, purrr::flatten(priors))
 
   return(stan_prep)
 }

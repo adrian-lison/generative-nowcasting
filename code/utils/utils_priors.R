@@ -3,10 +3,15 @@ define_priors <- function(model_def,
                           dirichlet_kappa = 1,
                           gamma_prior_precomputed_dir = NULL,
                           reporting_proportion = 1,
+                          latent_delay_dist = get_incubation_dist(gamma_mean = 5.3, gamma_sd = 3.2, maxInc = 14),
+                          generation_time_dist = get_generation_dist(gamma_mean = 4.8, gamma_sd = 2.3, maxGen = 10),
                           ...) {
   prior_def <- list()
 
   prior_def[["reporting_proportion"]] <- reporting_proportion
+  prior_def[["latent_delay_dist"]] <- latent_delay_dist
+  prior_def[["generation_time_dist"]] <- generation_time_dist
+  
 
   if (dirichlet_prior) {
     prior_def[["dirichlet_kappa"]] <- dirichlet_kappa
@@ -41,9 +46,12 @@ define_priors <- function(model_def,
     haz_sd_logit <- (max_haz_logit - mean_haz_logit) / 2
 
     gamma_prior_kappa_df <- data.frame(
+      gamma_idx = model_def$delay_idx[1:(length(model_def$delay_idx) - 2)],
       gamma_mu = rep(mean_haz_logit, model_def$D),
       sigma_gamma = rep(haz_sd_logit, model_def$D)
-    )
+    ) %>%
+      group_by(gamma_idx) %>%
+      summarize(across(everything(), mean), .groups = "drop")
   }
 
   additional_priors <- list(...)
@@ -89,7 +97,7 @@ define_priors <- function(model_def,
     priors[["R_sd"]] <- get_prior("R_sd", mu = 0, sd = 0.1) # note that this is (approximately) on the absolute scale: expect R to change at max by 1.4 within one week
     priors[["R_level_start"]] <- get_prior("R_level_start", mu = 1, sd = 0.8) # default R = 1, 95% interval between 2.6 and close to zero
     priors[["R_trend_start"]] <- get_prior("R_trend_start", mu = 0, sd = 0.1) # mean = no trend , 95% interval is 1.4 per day
-    priors[["iota_log_ar_start"]] <- get_prior("iota_log_ar_start", mu = log(stan_data_list$expected_cases_start / reporting_proportion), sd = 0.2) # slightly informed by data (expected cases), 95% interval: *0.67 -- *1.5
+    priors[["iota_log_ar_start"]] <- get_prior("iota_log_ar_start", mu = log(max(stan_data_list$expected_cases_start / reporting_proportion, 1e-4)), sd = 0.2) # slightly informed by data (expected cases), 95% interval: *0.67 -- *1.5
     priors[["iota_log_ar_sd"]] <- get_prior("iota_log_ar_sd", mu = 0.05, sd = 0.025) # log daily growth rate of up to 0.2, i.e. roughly relative changes of 20% (same for negative growth rates)
 
     # add further priors, potentially overwriting existing
@@ -108,7 +116,6 @@ define_priors <- function(model_def,
     if (stan_data_list$ets_diff == 0) {
       priors[["lambda_log_2nd_trend_start"]] <- get_prior("lambda_log_2nd_trend_start", mu = numeric(0), sd = numeric(0))
     }
-
     return(priors)
   }
   return(prior_def)

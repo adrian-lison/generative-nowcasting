@@ -18,9 +18,15 @@ make_nowcast <- function(data_def, model_def, prior_def, sampling_def, output_de
     dataset_index <- 1 + ((index - 1) %/% n_dates)
     date_index <- 1 + ((index - 1) %% n_dates)
   }
+  
+  ## Select data and priors for right dataset and date
   data_def$ll_data <- data_def$ll_data[[dataset_index]]
   data_def$now <- data_def$now[date_index]
   data_def$start_date <- data_def$start_date[date_index]
+  
+  if (is.list(prior_def$reporting_proportion) && length(prior_def$reporting_proportion)>1) {prior_def$reporting_proportion <- prior_def$reporting_proportion[[date_index]]}
+  if (is.list(prior_def$latent_delay_dist) && length(prior_def$latent_delay_dist)>1) {prior_def$latent_delay_dist <- prior_def$latent_delay_dist[[date_index]]}
+  if (is.list(prior_def$generation_time_dist) && length(prior_def$generation_time_dist)>1) {prior_def$generation_time_dist <- prior_def$generation_time_dist[[date_index]]}
   
   print(paste("Selected time window",
               data_def[["start_date"]], "to", data_def[["now"]],
