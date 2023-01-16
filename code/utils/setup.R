@@ -33,6 +33,8 @@ library(extraDistr)
 library(cmdstanr)
 library(tidybayes)
 
+library(scoringutils)
+
 # epi
 library(EpiEstim)
 
