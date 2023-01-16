@@ -174,10 +174,10 @@ get_mixture_discrete <- function(pmf_list, weights) {
 #' Compute a time series of distributions (one distribution per time step).
 #' Discrete distributions are specified at certain changepoints. Between the
 #' changepoints, the distribution transitions from the previous to the next
-#' distribution using a mixture with weight parameter inearly increasing
+#' distribution using a mixture with weight parameter linearly or logistically increasing
 #' from 0 to 1.
 #'
-get_distribution_time_series <- function(changepoints = NULL, lengths = NULL, tribble_format = NULL, pmf_list) {
+get_distribution_time_series <- function(changepoints = NULL, lengths = NULL, tribble_format = NULL, pmf_list, shape = "linear") {
   if (!is.null(tribble_format)) {
     if ("changepoints" %in% names(tribble_format)) changepoints <- tribble_format$changepoints
     if ("lengths" %in% names(tribble_format)) lengths <- tribble_format$lengths
@@ -193,7 +193,16 @@ get_distribution_time_series <- function(changepoints = NULL, lengths = NULL, tr
   stopifnot(changepoints[1] == 1 & !is.unsorted(changepoints))
   start <- list(matrix(pmf_list[[1]], nrow = 1))
   transitions <- lapply(1:(length(changepoints) - 1), function(cp_index) {
-    mixing_weights <- seq(0, 1, length.out = changepoints[cp_index + 1] - changepoints[cp_index] + 1)[-1]
+    if (shape == "linear") {
+      # weights for new distribution grow from 0 to 1 according to a linear function
+      mixing_weights <- seq(0, 1, length.out = changepoints[cp_index + 1] - changepoints[cp_index] + 1)[-1]
+    }
+    else if (shape == "logistic") {
+      # weights for new distribution grow from 0 to 1 according to a logistic function
+      mixing_weights <- round(plogis(seq(-6,6,length.out = changepoints[cp_index + 1] - changepoints[cp_index] + 1)),2)[-1]
+    } else {
+      stop("No valid shape function ('linear' or 'logistic') provided.")
+    }
     transition <- t(sapply(mixing_weights, function(w) get_mixture_discrete(list(pmf_list[[cp_index]], pmf_list[[cp_index + 1]]), c(1 - w, w))))
     return(transition)
   })
