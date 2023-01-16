@@ -304,6 +304,18 @@ plot_dist_ts <- function(ts_matrix, xlab = "Time", ylab = "Delay") {
   )
 }
 
+plot_dist_ts_quantiles <- function(x) {
+  df <- data.frame(mean = dist_get_mean(x),
+                   median = dist_get_quantile(x, p = 0.5),
+                   lower = dist_get_quantile(x, p = 0.05),
+                   upper = dist_get_quantile(x, p = 0.95)) %>% 
+    mutate(t = 1:n())
+  ggplot(df, aes(x = t)) + geom_ribbon(aes(ymin=lower,ymax=upper), alpha = 0.3) +
+    geom_line(aes(y=median)) + geom_line(aes(y=mean), linetype = "dashed") +
+    ylab("x") + theme_bw()
+}
+
+
 sample_overall_delays <- function(t, samples = 10) {
   samples <- rcat(samples, prob = symp_to_hosp_dist[t, ]) + rcat(samples, prob = hosp_to_rep_dist[t, ])
   counts <- as.vector(table(cut(samples, breaks = 0:(maxSympToHosp + maxHospToRep + 1))))
@@ -313,4 +325,8 @@ sample_overall_delays <- function(t, samples = 10) {
 
 dist_get_mean <- function(ts_matrix) {
   return(rowSums(ts_matrix * matrix(rep(0:(ncol(ts_matrix) - 1), nrow(ts_matrix)), ncol = ncol(ts_matrix), byrow = T)))
+}
+
+dist_get_quantile <- function(x, p = 0.5) {
+  sapply(1:nrow(x), function(i) which(cumsum(x[i,])>=p)[1])
 }
