@@ -1,47 +1,6 @@
 
 # Summary of fitted nowcasting models ----
 
-draws_R_renewal <- function(p_nowcast, start_date, now, ndraws, samples_per_draw, standata, inits) {
-  renewal_model <- cmdstan_model(here::here("code", "models", "renewal.stan"))
-
-  Rdraws <- lapply(1:ndraws, function(i) {
-    onsets <- p_nowcast %>%
-      filter(.draw == i) %>%
-      pull(nowcast_all)
-    sample_R_renewal(onsets, standata, renewal_model, inits, samples_per_draw)
-  })
-
-  Rdraws <- bind_rows(Rdraws) %>%
-    mutate(date = recode(date, !!!seq(as.Date(start_date) - standata$n_lambda_pre - standata$L + standata$max_gen, as.Date(now), by = 1)))
-
-  return(Rdraws)
-}
-
-sample_R_renewal <- function(onsets, standata, renewal_model, inits, samples_per_draw) {
-  standata$T <- length(onsets)
-  standata$onsets <- onsets
-
-  Rfit <- renewal_model$sample(
-    data = standata,
-    iter_warmup = 500,
-    iter_sampling = as.integer(ceiling(samples_per_draw / 4)),
-    adapt_delta = 0.95,
-    step_size = 0.01,
-    max_treedepth = 15,
-    chains = 4,
-    parallel_chains = 1,
-    seed = 42,
-    refresh = 200,
-    init = inits,
-    show_messages = F
-  )
-
-  Rdraws <- Rfit %>%
-    spread_draws(R[date])
-
-  return(Rdraws)
-}
-
 ## Overall summary function ----
 
 summarize_fit <- function(fitted_model,
@@ -87,19 +46,18 @@ summarize_fit <- function(fitted_model,
       if (model_type %in% c("base", "nowcast_imputed")) {
 
         # epiEstim
-        R_draws_epiestim <- draws_R_epiestim(fitted_model, start_date, now,
+        R_draws_epiestim <- draws_R_epiestim(fitted_model, start_date, now, stan_data_list$n_lambda_pre,
           maxT = stan_data_list$T,
           L = stan_data_list$L,
           latent_delay_dist = stan_data_list$latent_delay_dist,
+          generation_time_dist = stan_data_list$generation_time_dist,
+          mean_Re_prior = 1,
           n_samples = 1000,
           estimation_window = 7,
-          mean_serial_interval = 4.8,
-          std_serial_interval = 2.3,
-          mean_Re_prior = 1,
           sample_incubation = FALSE
         )
 
-        R_draws_renewal <- draws_R_renewal(posterior_nowcast_temp, start_date, now,
+        R_draws_renewal <- draws_R_renewal(posterior_nowcast_temp, start_date, now, stan_data_list$n_lambda_pre,
           ndraws = 40,
           samples_per_draw = 100,
           standata = stan_data_list,
@@ -334,39 +292,17 @@ posterior_R <- function(fit, start_date, now, n_lambda_pre, L, max_gen) {
     return()
 }
 
-.sample_R <- function(incid, mean_serial_interval, std_serial_interval, t_start, t_end, mean_Re_prior = 1) {
-  R_instantaneous <- estimate_R(
-    incid = incid,
-    method = "parametric_si",
-    config = EpiEstim::make_config(
-      list(
-        mean_si = mean_serial_interval,
-        std_si = std_serial_interval,
-        t_start = t_start,
-        t_end = t_end,
-        mean_prior = mean_Re_prior
-      )
-    )
-  )
-
-  R_mean <- R_instantaneous$R$`Mean(R)`
-  R_sd <- R_instantaneous$R$`Std(R)`
-  # draw one sample from the posterior for R_t
-  R_draw <- rgamma(length(R_mean), shape = (R_mean / R_sd)^2, rate = R_mean / (R_sd^2))
-  return(data.frame(t = t_end, R = R_draw))
-}
-
 draws_R_epiestim <- function(fit,
                              start_date,
                              now,
+                             n_lambda_pre,
                              maxT,
                              L,
                              latent_delay_dist,
+                             generation_time_dist,
+                             mean_Re_prior = 1,
                              n_samples = 1000,
                              estimation_window = 7,
-                             mean_serial_interval = 4.8,
-                             std_serial_interval = 2.3,
-                             mean_Re_prior = 1,
                              sample_incubation = FALSE) {
   right_bound <- maxT - (estimation_window - 1)
   t_start <- seq(1 + L, right_bound)
@@ -393,12 +329,74 @@ draws_R_epiestim <- function(fit,
   R_draws <- R_draws %>%
     group_by(.draw) %>%
     arrange(date) %>%
-    group_modify(~ .sample_R(.x$nowcast_all / rep_prop, mean_serial_interval, std_serial_interval, t_start, t_end, mean_Re_prior)) %>%
+    group_modify(~ sample_R_epiestim(.x$nowcast_all / rep_prop, generation_time_dist, t_start, t_end, mean_Re_prior)) %>%
     mutate(inc_sample = ifelse(rep(sample_incubation, n()), sample(x = 0:L, size = n(), prob = latent_delay_dist, replace = T), as.integer(ceiling(mean_inc)))) %>%
-    transmute(date = recode(t, !!!seq(as.Date(start_date), as.Date(now), by = 1)) - inc_sample, R) %>%
+    transmute(date = recode(t, !!!seq(as.Date(start_date) - n_lambda_pre, as.Date(now), by = 1)) - inc_sample, R) %>%
     mutate(date = date - as.integer(floor(estimation_window / 2))) # center R estimates on smoothing window
 
   return(R_draws)
+}
+
+sample_R_epiestim <- function(incid, generation_time_dist, t_start, t_end, mean_Re_prior = 1) {
+  R_instantaneous <- estimate_R(
+    incid = incid,
+    method = "non_parametric_si",
+    config = EpiEstim::make_config(
+      list(
+        si_distr = c(0, generation_time_dist), # adding day zero to generation_time_dist vector because epiEstim expects it
+        t_start = t_start,
+        t_end = t_end,
+        mean_prior = mean_Re_prior
+      )
+    )
+  )
+  
+  R_mean <- R_instantaneous$R$`Mean(R)`
+  R_sd <- R_instantaneous$R$`Std(R)`
+  # draw one sample from the posterior for R_t
+  R_draw <- rgamma(length(R_mean), shape = (R_mean / R_sd)^2, rate = R_mean / (R_sd^2))
+  return(data.frame(t = t_end, R = R_draw))
+}
+
+draws_R_renewal <- function(p_nowcast, start_date, now, n_lambda_pre, ndraws, samples_per_draw, standata, inits) {
+  renewal_model <- cmdstan_model(here::here("code", "models", "renewal.stan"))
+  
+  Rdraws <- lapply(1:ndraws, function(i) {
+    onsets <- p_nowcast %>%
+      filter(.draw == i) %>%
+      pull(nowcast_all)
+    sample_R_renewal(onsets, standata, renewal_model, inits, samples_per_draw)
+  })
+  
+  Rdraws <- bind_rows(Rdraws) %>%
+    mutate(date = recode(date, !!!seq(as.Date(start_date) - n_lambda_pre - standata$L + standata$max_gen, as.Date(now), by = 1)))
+  
+  return(Rdraws)
+}
+
+sample_R_renewal <- function(onsets, standata, renewal_model, inits, samples_per_draw) {
+  standata$T <- length(onsets)
+  standata$onsets <- onsets
+  
+  Rfit <- renewal_model$sample(
+    data = standata,
+    iter_warmup = 500,
+    iter_sampling = as.integer(ceiling(samples_per_draw / 4)),
+    adapt_delta = 0.95,
+    step_size = 0.01,
+    max_treedepth = 15,
+    chains = 4,
+    parallel_chains = 1,
+    seed = 42,
+    refresh = 200,
+    init = inits,
+    show_messages = F
+  )
+  
+  Rdraws <- Rfit %>%
+    spread_draws(R[date])
+  
+  return(Rdraws)
 }
 
 get_imputed_posterior <- function(fitted_model, D, ndraws = 100) {
