@@ -142,7 +142,7 @@ transformed parameters {
   // occurrence process (convolution)
   profile ("transformed_lambda") {
   for(t in 1:(n_lambda_pre+T)) {
-    lambda_log[t] = log(dot_product(latent_delay_dist_reversed,iota[(L+t-L):(L+t)]));
+    lambda_log[t] = log(dot_product(latent_delay_dist_reversed,I[(L+t-L):(L+t)]));
   }
   }
   

@@ -43,6 +43,22 @@ data {
 
 transformed data {
   array[T-D, D+1] int reported_known_report = reporting_triangle_by_report(reported_known, D);
+  matrix[n_lambda_pre+T,n_beta] Z_mat; // design matrix for changepoint model
+  matrix[n_delays,D] delay_idx_map = rep_matrix(0, n_delays, D); // weighted mapping from delay idx to delay
+  for (i in 1:n_lambda_pre+T) {
+    Z_mat[i,:] = Z[i];
+  }
+  
+  // weighted mapping from delay idx to delay
+  {
+    for (j in 1:D) {
+      delay_idx_map[delay_idx[j],j] = 1;
+    }
+    vector[n_delays] rowSums = delay_idx_map * rep_vector(1, D);
+    for (i in 1:n_delays) {
+      delay_idx_map[i,] = delay_idx_map[i,]/rowSums[i];
+    }
+  }
 }
 
 parameters {
@@ -67,9 +83,10 @@ transformed parameters {
     
     // inference phase
     for(t in (D+1):T) {
-      //delay distribution
-      contrib_occurrence_covariates = Z[n_lambda_pre+t] * beta;
-      logit_haz_interval[1:n_delays] = gamma[1:n_delays] + rep_vector(contrib_occurrence_covariates,n_delays) + W[n_lambda_pre+t,1:n_delays] * eta;
+      //backward delay distribution
+      vector[D] occ_full = reverse(Z_mat[(n_lambda_pre+t-(D-1)):(n_lambda_pre+t),:] * beta);
+      vector[n_delays] occ_sparse = delay_idx_map * occ_full;
+      logit_haz_interval[1:n_delays] = gamma[1:n_delays] + occ_sparse + rep_vector(W[n_lambda_pre+t,1]*eta, n_delays);
       hazard[1:D] = inv_logit(logit_haz_interval)[delay_idx[1:D]];
   
       p[:, t-D] = compute_prob_from_hazard(hazard[1:D]);

@@ -8,7 +8,7 @@ functions  {
 
 data {
   int T; // number of days
-  array[T] int onsets; // time series of symptom onsets
+  array[T] int cases; // time series of cases (e.g. by symptom onset date)
   
   // include latent delay data
 #include data/latent_delay.stan
@@ -117,7 +117,7 @@ transformed parameters {
   // occurrence process (convolution)
   profile ("transformed_lambda") {
   for(t in 1:(T)) {
-    lambda_log[t] = log(dot_product(latent_delay_dist_reversed,iota[(L+t-L):(L+t)]));
+    lambda_log[t] = log(dot_product(latent_delay_dist_reversed,I[(L+t-L):(L+t)]));
   }
   }
   
@@ -163,11 +163,11 @@ model {
   // Likelihood
   profile ("likelihood") {
   {
-  // likelihood for observed symptom onsets
+  // likelihood for observed cases
   if (overdispersion) {
-    onsets ~ neg_binomial_2_log(lambda_log, phi_negbinom);
+    cases ~ neg_binomial_2_log(lambda_log, phi_negbinom);
   } else {
-    onsets ~ poisson_log(lambda_log);
+    cases ~ poisson_log(lambda_log);
   }
   }
   }

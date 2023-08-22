@@ -1,13 +1,4 @@
-
-###########################################################################
-###########################################################################
-###                                                                     ###
-###                 PLOTTING FUNCTIONALITY FOR NOWCASTS                 ###
-###                                                                     ###
-###########################################################################
-###########################################################################
-
-
+# PLOTTING FUNCTIONALITY FOR NOWCASTS
 
 plot_nowcast_observed <- function(fit_summary,
                                   truth = NULL,
@@ -200,18 +191,19 @@ plot_R <- function(fit_summary,
                    show_weekends = T,
                    show_data_horizons = T,
                    y_lim = NULL,
+                   R_type = "R", # can also be "R_epiestim" or "R_renewal"
                    event1_axislabel = "Date of secondary infection",
                    reported_cases = NULL) {
   now <- fit_summary[["now"]]
   mindate <- now - time_window # e.g. time_window=28 to show the last four weeks
   maxdate <- now
 
-  max_R <- fit_summary[["R"]] %>%
+  max_R <- fit_summary[[R_type]] %>%
     filter(date > mindate, date <= maxdate) %>%
     pull(.upper) %>%
     max()
 
-  plot <- fit_summary[["R"]] %>%
+  plot <- fit_summary[[R_type]] %>%
     mutate(is_weekend = lubridate::wday(date, label = TRUE) %in% c("Sat", "Sun")) %>%
     filter(date > mindate, date <= maxdate) %>% # - fit_summary[["median_incubation"]]
     ggplot(aes(x = date, y = R)) +
@@ -254,8 +246,6 @@ plot_alpha <- function(fit_summary,
   now <- fit_summary[["now"]]
   mindate <- now - time_window # e.g. time_window=28 to show the last four weeks
   maxdate <- now
-
-  print(fit_summary[["fraction_complete"]])
 
   max_alpha <- fit_summary[["fraction_complete"]] %>%
     filter(date > mindate, date <= maxdate) %>%
@@ -330,7 +320,7 @@ plot_delay <- function(fit_summary,
     geom_ribbon(aes(ymin = .lower, ymax = .upper), fill = "#aa80ff", alpha = 0.6) +
     geom_line(color = "#9900cc") +
     {
-      if (!is.null(truth)) geom_line(data = truth, aes(x = date, y = mean_delay), color = "red")
+      if (!is.null(truth) && ("mean_delay" %in% names(truth))) geom_line(data = truth, aes(x = date, y = mean_delay), color = "red")
     } +
     theme_bw() +
     ylab("Mean delay [days]") +
@@ -361,7 +351,7 @@ plot_delay <- function(fit_summary,
 
 #' Helper function, provides an interface for validation result nowcasts to
 #' be plotted using the other plotting functions
-plot_validate <- function(nowcasts, maxDelay, delay_plot, plot_nowcast_date, plot_function, time_window, with_naive = F, ...) {
+plot_validate <- function(nowcasts, maxDelay, delay_plot, plot_nowcast_date, plot_function, time_window, with_naive = F, plot_R_model = c("epiestim", "renewal"), ...) {
   if (missing(delay_plot)) delay_plot <- unique(nowcasts$delay)
   if (missing(plot_nowcast_date)) plot_nowcast_date <- unique(nowcasts$nowcast_date)
 
@@ -395,7 +385,7 @@ plot_validate <- function(nowcasts, maxDelay, delay_plot, plot_nowcast_date, plo
   if ("R" %in% names(nowcasts)) {
     input_R <- nowcasts %>%
       mutate(.width = 0.95) %>%
-      filter(delay %in% delay_plot, nowcast_date %in% plot_nowcast_date) %>%
+      filter(R_model %in% plot_R_model, delay %in% delay_plot, nowcast_date %in% plot_nowcast_date) %>%
       select(date, delay, nowcast_date, R, .upper = R.upper, .lower = R.lower)
   } else {
     input_R <- NULL
