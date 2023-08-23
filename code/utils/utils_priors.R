@@ -115,12 +115,11 @@ define_priors <- function(model_def,
     priors[["ets_phi"]] <- get_prior("ets_phi", alpha = 50, beta = 5)
 
     stepwise_models <- c(
-      "base",
-      "base_old",
-      "nowcast_imputed",
-      "impute_and_nowcast",
-      "impute_forward_and_nowcast",
-      "impute_parametric_and_nowcast"
+      "impute_adjust",
+      "adjust",
+      "impute_then_adjust",
+      "impute_independent_then_adjust",
+      "impute_parametric_then_adjust"
     )
 
     if (model_def$model_type %in% stepwise_models) {

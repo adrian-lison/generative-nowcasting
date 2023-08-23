@@ -1,6 +1,39 @@
 #' Define details of the nowcasting model to be used.
+#' 
+#' @details The following models are available:
+#' - renewal_direct (renewal model for direct R estimation)                       
+#' - impute_adjust (joint model for imputation and truncation adjustment)
+#' - impute_adjust_latent (joint model for imputation and truncation adjustment)
+#' - impute_adjust_renewal (joint model for imputation, truncation adjustment 
+#' and R estimation)
+#' - impute (imputation model for missing reference dates)
+#' - impute_parametric (imputation model for missing reference dates, using a 
+#' parametric instead of a non-parametric delay distribution model)
+#' - impute_independent (imputation model for missing reference dates, using 
+#' independent imputation, no backward delay model)
+#' - adjust (model for truncation adjustment, supports multiple imputed data
+#' as input)
+#' - adjust_renewal (joint model for truncation adjustment and R estimation, 
+#' supports multiple imputed data as input)
+#' - impute_then_adjust (stepwise: imputation using model "impute", truncation 
+#' adjustment using model "adjust")
+#' - impute_then_adjust_renewal (stepwise: imputation using model "impute", 
+#' truncation adjustment and R estimation using joint model "adjust_renewal")
+#' - impute_independent_then_adjust (stepwise: imputation using model 
+#' "impute_independent", truncation adjustment using model "adjust")
+#' - impute_independent_then_adjust_renewal (stepwise: imputation using model 
+#' "impute_independent", truncation adjustment and R estimation using joint 
+#' model "adjust_renewal")
+#' - impute_parametric_then_adjust (stepwise: imputation using model 
+#' "impute_parametric", truncation adjustment using model "adjust")
+#' 
+#' @details Models of the type "adjust" without a renewal component will also
+#' estimate R in an additional step, once using the model "renewal_direct" and 
+#' once using EpiEstim. Uncertainty from the previous steps is accounted for
+#' via resampling.
 #'
-#' @param model_type The specific model to be used. One out of: ToDo
+#' @param model_type The specific model to be used. See details for the
+#'   different model types available.
 #' @param D The maximum assumed reporting delay
 #' @param delay_resolution A `vector` describing the resolution at which the
 #'   discrete reporting delay distribution should be modeled. The `vector`
@@ -41,9 +74,11 @@
 #' @param threads Should within-chain parallelization be supported using
 #'   threading?
 #' @param force_recompile Should recompilation be enforced?
+#' @param model_folder In which subfolder of the "code" folder is the model
+#'   stored?
 #'
 #' @return A `list` with the model type and details of the model definition.
-define_model <- function(model_type = "base",
+define_model <- function(model_type = "impute_adjust",
                          D = 28,
                          delay_resolution = NULL,
                          delay_changepoint = "rw",
@@ -55,40 +90,35 @@ define_model <- function(model_type = "base",
                          ets_noncentered = TRUE,
                          profile = FALSE,
                          threads = FALSE,
-                         force_recompile = FALSE) {
+                         force_recompile = FALSE,
+                         model_folder = "models") {
   model_def <- list()
 
   model_def[["model_type"]] <- model_type
   model_def[["model_name"]] <- switch(model_type,
-    base = list("nowcast_impute.stan"),
-    base_old = list("nowcast_impute.stan"),
-    latent = list("nowcast_latent_impute.stan"),
-    renewal = list("nowcast_renewal_impute.stan"),
-    renewal_noncentered = list("nowcast_renewal_impute_noncentered.stan"),
-    renewal_deterministic = list("nowcast_renewal_impute_deterministic.stan"),
-    impute = list("impute_nonparametric.stan"),
-    impute_parametric = list("impute_parametric_nb.stan"),
-    impute_forward = list("impute_forward.stan"),
-    nowcast_imputed = list("nowcast_multiple_impute.stan"),
-    nowcast_imputed_renewal = list("nowcast_multiple_impute_renewal.stan"),
-    impute_and_nowcast = list("impute_nonparametric.stan",
-                              "nowcast_multiple_impute.stan"),
-    impute_forward_and_nowcast = list("impute_forward.stan",
-                                      "nowcast_multiple_impute.stan"),
-    impute_and_nowcast_renewal = list("impute_nonparametric.stan",
-                                      "nowcast_multiple_impute_renewal.stan"),
-    impute_forward_and_nowcast_renewal = list("impute_forward.stan",
-                                              "nowcast_multiple_impute_renewal.stan"),
-    impute_parametric_and_nowcast = list("impute_parametric_nb.stan",
-                                         "nowcast_multiple_impute.stan"),
-    renewal_direct = list("renewal.stan"),
+    renewal_direct = list("renewal.stan"),                                  
+    impute_adjust = list("impute_adjust.stan"),
+    impute_adjust_latent = list("impute_adjust_latent.stan"),
+    impute_adjust_renewal = list("impute_adjust_renewal.stan"),
+    impute = list("impute_backward.stan"),
+    impute_parametric = list("impute_backward_negbin.stan"),
+    impute_independent = list("impute_independent.stan"),
+    adjust = list("adjust.stan"),
+    adjust_renewal = list("adjust_renewal.stan"),
+    impute_then_adjust = list("impute_backward.stan",
+                              "adjust.stan"),
+    impute_then_adjust_renewal = list("impute_backward.stan",
+                                      "adjust_renewal.stan"),
+    impute_independent_then_adjust = list("impute_independent.stan",
+                                          "adjust.stan"),
+    impute_independent_then_adjust_renewal = list("impute_independent.stan", 
+                                                  "adjust_renewal.stan"),
+    impute_parametric_then_adjust = list("impute_backward_negbin.stan",
+                                         "adjust.stan"),
     stop("Unknown model type.")
   )
-  if (model_type %in% c("base_old")) {
-    model_def[["model_folder"]] <- "models_old"
-  } else {
-    model_def[["model_folder"]] <- "models"
-  }
+
+  model_def[["model_folder"]] <- model_folder
 
   model_def[["D"]] <- D
   model_def[["delay_resolution"]] <- delay_resolution

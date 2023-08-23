@@ -60,11 +60,11 @@ define_job <- function(job_name,
 #' `define_output()`.
 make_nowcast_from_job <- function(job, index = NULL) {
   imputation_models <- c(
-    "impute_and_nowcast",
-    "impute_forward_and_nowcast",
-    "impute_and_nowcast_renewal",
-    "impute_forward_and_nowcast_renewal",
-    "impute_parametric_and_nowcast"
+    "impute_then_adjust",
+    "impute_independent_then_adjust",
+    "impute_then_adjust_renewal",
+    "impute_independent_then_adjust_renewal",
+    "impute_parametric_then_adjust"
   )
 
   if (nowcast_job$model_def$model_type %in% imputation_models) {

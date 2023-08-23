@@ -30,7 +30,7 @@ summarize_fit <- function(fitted_model,
 
   model_summary <- summarize_model(start_date, now, stan_data_list)
 
-  if (model_type %in% c("impute", "impute_parametric", "impute_forward")) {
+  if (model_type %in% c("impute", "impute_parametric", "impute_independent")) {
     fit_summary <- summarize_impute(
       fitted_model, output_def, start_date, now, stan_data_list
     )
@@ -80,7 +80,7 @@ summarize_fit <- function(fitted_model,
         )
     }
 
-    if (model_type %in% c("base", "nowcast_imputed")) {
+    if (model_type %in% c("impute_adjust", "adjust")) {
       if ("R_epiestim" %in% output_def) {
         R_draws_epiestim <- draws_R_epiestim(
           fitted_model,
@@ -117,7 +117,7 @@ summarize_fit <- function(fitted_model,
             ndraws = 50,
             samples_per_draw = 80,
             standata = stan_data_list,
-            inits = default_inits(stan_data_list, "renewal")
+            inits = default_inits(stan_data_list, "impute_adjust_renewal")
           )
 
           fit_summary[["R_renewal"]] <- R_draws_renewal %>%
@@ -131,7 +131,7 @@ summarize_fit <- function(fitted_model,
         })
       }
     } else if (model_type %in% 
-               c("renewal", "renewal_direct", "nowcast_imputed_renewal")) {
+               c("impute_adjust_renewal", "renewal_direct", "adjust_renewal")) {
       fit_summary[["R_renewal"]] <- summarize_R(
         fitted_model, start_date, now, stan_data_list$n_lambda_pre, 
         stan_data_list$L, stan_data_list$max_gen

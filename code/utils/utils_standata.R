@@ -75,7 +75,7 @@ get_stanprep <- function(data_def, model_def, prior_def, sampling_def) {
   stan_prep$stan_data_list[["ets_noncentered"]] <- model_def[["ets_noncentered"]]
 
   # add information about multiple imputations
-  if (model_def$model_type %in% c("nowcast_imputed", "nowcast_imputed_renewal")) {
+  if (model_def$model_type %in% c("adjust", "adjust_renewal")) {
     if (!("imputed_posterior" %in% names(data_def))) {
       stop("Multiple imputed data missing.")
     } else {

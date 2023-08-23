@@ -310,7 +310,7 @@ default_inits <- function(standat, model_type) {
     inits[["ets_phi"]] <- 1e-4
     
     # expected cases (if stepwise approach)
-    if (model_type %in% c("base", "base_old", "nowcast_imputed")) {
+    if (model_type %in% c("impute_adjust", "adjust")) {
       inits[["lambda_log_start_values"]] <- c(
         log(max(standat$expected_cases_start, 1e-4)),
         rep(0, 1 + standat$ets_diff)

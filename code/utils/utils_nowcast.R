@@ -118,7 +118,7 @@ make_nowcast <- function(data_def, model_def, prior_def, sampling_def,
     show_messages = sampling_def[["show_messages"]],
     output_dir = stan_output_dir,
     # independent imputation model only needs generated quantities
-    fixed_param = (model_def$model_type == "impute_forward")
+    fixed_param = (model_def$model_type == "impute_independent")
   ))
 
   ## Direct postprocessing ----
@@ -218,10 +218,10 @@ fit_impute_and_nowcast <- function(data_def, model_def, prior_def, sampling_def,
   )
 
   impute_modeltype <- switch(model_def$model_type,
-    impute_and_nowcast = "impute",
-    impute_and_nowcast_renewal = "impute",
-    impute_forward_and_nowcast = "impute_forward",
-    impute_forward_and_nowcast_renewal = "impute_forward",
+    impute_then_adjust = "impute",
+    impute_then_adjust_renewal = "impute",
+    impute_independent_then_adjust = "impute_independent",
+    impute_independent_then_adjust_renewal = "impute_independent",
     stop("Unknown model type.")
   )
 
@@ -277,10 +277,10 @@ fit_impute_and_nowcast <- function(data_def, model_def, prior_def, sampling_def,
   )
 
   nowcast_modeltype <- switch(model_def$model_type,
-    impute_and_nowcast = "nowcast_imputed",
-    impute_forward_and_nowcast = "nowcast_imputed",
-    impute_and_nowcast_renewal = "nowcast_imputed_renewal",
-    impute_forward_and_nowcast_renewal = "nowcast_imputed_renewal",
+    impute_then_adjust = "adjust",
+    impute_independent_then_adjust = "adjust",
+    impute_then_adjust_renewal = "adjust_renewal",
+    impute_independent_then_adjust_renewal = "adjust_renewal",
     stop("Unknown model type.")
   )
 
