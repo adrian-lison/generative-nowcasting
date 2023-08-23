@@ -31,12 +31,12 @@ define_results <- function(file_pattern, result_folder, result_subfolder,
 
   # get file paths
   result_path <- file.path(result_folder, result_subfolder)
-  files_result <- data.frame(result_file = list.files(
-    path = result_path, pattern = resultfile_pattern, full.names = T
-  ))
-  files_output <- data.frame(output_file = list.files(
-    path = result_path, pattern = outputfile_pattern, full.names = T
-  ))
+  files_result <- data.frame(result_file = file.path(result_path, list.files(
+    path = here::here(result_path), pattern = resultfile_pattern, full.names = F
+  )))
+  files_output <- data.frame(output_file = file.path(result_path, list.files(
+    path = here::here(result_path), pattern = outputfile_pattern, full.names = T
+  )))
 
   # determine IDs
   resultfile_start_end <- str_split(resultfile_pattern, pattern = "\\\\d\\+")[[1]]
@@ -77,7 +77,7 @@ define_results <- function(file_pattern, result_folder, result_subfolder,
     additional_info <- lapply(results$result_file, function(x) {
       try(
         {
-          result_f <- read_rds(x)
+          result_f <- read_rds(here::here(x))
           if ("now" %in% names(result_f$summary)) {
             return(list(
               result_f$summary$now,
@@ -150,13 +150,13 @@ define_results <- function(file_pattern, result_folder, result_subfolder,
 #'
 #' @returns A named `list` corresponding to `list_of_sources`, with the
 #'   different result indices.
-define_result_list <- function(result_folder, result_info = T, list_of_sources,
+define_result_list <- function(result_folder = "results", result_info = T, list_of_sources,
                                overwrite = F, resultfile_pattern = NULL,
                                outputfile_pattern = NULL) {
   res_list <- as.list(list_of_sources)
 
   for (i in seq_along(res_list)) {
-    res_file <- here::here("batch", "jobs", res_list[[i]], "results_index.rds")
+    res_file <- here::here(result_folder, res_list[[i]], "results_index.rds")
     if (!overwrite && file.exists(res_file)) {
       res_list[[i]] <- readRDS(res_file)
     } else {
@@ -210,7 +210,7 @@ load_results_sim <- function(res_list, maxDelay, reference_date,
     parent_dir <- dirname(res_list[[i]]$result_file[
       min(which(!is.na(res_list[[i]]$result_file)))
     ])
-    res_file <- file.path(parent_dir, "all_results.rds")
+    res_file <- here::here(parent_dir, "all_results.rds")
 
     if (!overwrite && file.exists(res_file)) {
       print(paste("Loading already existing results for", names(res_list)[i]))
@@ -276,7 +276,7 @@ load_results_real <- function(res_list, maxDelay, reference_date,
   # Run once without ground truth emp
   n_res_list <- lapply(res_list, function(res) {
     gc()
-    all_results_path <- file.path(dirname(res$result_file[1]), "all_results.rds")
+    all_results_path <- here::here(dirname(res$result_file[1]), "all_results.rds")
     if (!overwrite & file.exists(all_results_path)) {
       print(paste(all_results_path, "already exists"))
       return(readRDS(all_results_path))
@@ -300,7 +300,7 @@ load_results_real <- function(res_list, maxDelay, reference_date,
   # Run again with ground empirical truth and save
   n_res_list <- lapply(res_list, function(res) {
     gc()
-    all_results_path <- file.path(dirname(res$result_file[1]), "all_results.rds")
+    all_results_path <- here::here(dirname(res$result_file[1]), "all_results.rds")
     if (!overwrite & file.exists(all_results_path)) {
       res_load <- readRDS(all_results_path)
       if (any(grepl("_true", names(res_load)))) {
@@ -337,7 +337,7 @@ load_results_real <- function(res_list, maxDelay, reference_date,
 #'
 #' @return A `list` with summary data frames and the full diagnostic data frames
 get_diagnostics <- function(results, n_chains = 4, overwrite = FALSE, horizon = 4*7) {
-  diags_file <- file.path(dirname(results$result_file[
+  diags_file <- here::here(dirname(results$result_file[
     min(which(!is.na(results$result_file)))
   ]), "results_diagnostics.rds")
 
@@ -352,7 +352,7 @@ get_diagnostics <- function(results, n_chains = 4, overwrite = FALSE, horizon = 
       if (is.na(res["result_file"])) {
         return(data.frame(id = res["id"]))
       }
-      nowcast <- read_rds(res["result_file"])
+      nowcast <- read_rds(here::here(res["result_file"]))
       if (!("diagnostic_summary" %in% names(nowcast))) {
         return(data.frame(id = res["id"]))
       }
@@ -363,34 +363,34 @@ get_diagnostics <- function(results, n_chains = 4, overwrite = FALSE, horizon = 
       diags$dataset_index <- nowcast$dataset_index
       diags$date_index <- nowcast$date_index
       diags$now <- nowcast$summary$now
-      diags$ess <- !str_detect(
-        nowcast$diagnostics$stdout,
-        "Effective sample size satisfactory."
-      )
+      
       ess_params <- str_trim(str_extract(nowcast$diagnostics$stdout,
         pattern = "(?<=effective draws per transition:\\n).*(?=\\n)"
       ))
-      #ess_nowcast <- str_extract_all(ess_params, "nowcast_all\\[\\d+\\]")
       ess_nowcast <- as.integer(str_extract_all(
         ess_params, "(?<=nowcast_all\\[)\\d+(?=\\])")[[1]])
-      diags$ess_nowcast <- any(with(nowcast$summary,ess_nowcast > T+L-horizon))
+      diags$ess_nowcast <- list(ess_nowcast[
+        with(nowcast$summary,ess_nowcast > T+L-horizon)
+        ])
       ess_R <- as.integer(str_extract_all(
         ess_params, "(?<=R\\[)\\d+(?=\\])")[[1]])
-      diags$ess_R <- any(with(nowcast$summary,ess_R > T+L-max_gen-horizon))
-      diags$rhat_problem <- !is.na((str_extract(nowcast$diagnostics$stdout,
-        pattern = "The following parameters had split R-hat greater than"
-      )))
+      diags$ess_R <- list(ess_R[
+        with(nowcast$summary,ess_R > T+L-max_gen-horizon)
+        ])
+      
       rhat_params <- str_trim(str_extract(nowcast$diagnostics$stdout,
         pattern = "(?<=R-hat greater than \\d[[:punct:]]\\d\\d:\\n).*(?=\\n)"
       ))
       rhat_nowcast <- as.integer(str_extract_all(
         rhat_params, "(?<=nowcast_all\\[)\\d+(?=\\])")[[1]])
-      diags$rhat_nowcast <- any(with(nowcast$summary,rhat_nowcast > T+L-horizon))
+      diags$rhat_nowcast <- list(rhat_nowcast[
+        with(nowcast$summary,rhat_nowcast > T+L-horizon)
+      ])
       rhat_R <- as.integer(str_extract_all(
         rhat_params, "(?<=R\\[)\\d+(?=\\])")[[1]])
-      diags$rhat_R <- any(with(nowcast$summary,rhat_R > T+L-max_gen-horizon))
-      diags$ess_params <- ess_params
-      diags$rhat_params <- rhat_params
+      diags$rhat_R <- list(rhat_R[
+      with(nowcast$summary,rhat_R > T+L-max_gen-horizon)
+      ])
       return(diags)
     }))
 
@@ -399,14 +399,15 @@ get_diagnostics <- function(results, n_chains = 4, overwrite = FALSE, horizon = 
       )) %>%
       group_by(id, fit_datetime, dataset_index, date_index, now) %>%
       summarize(
-        across(c(num_divergent, num_max_treedepth), sum),
-        n_low_ebfmi = sum(ebfmi < 0.3),
-        across(c(ess, ess_nowcast, ess_R, rhat_problem, rhat_nowcast, rhat_R), 
-               sum, na.rm = T),
-        ess_params = list(ess_params),
-        rhat_params = list(rhat_params),
+        chains_divergent = sum(num_divergent > 40),
+        chains_max_treedepth = sum(num_max_treedepth > 0),
+        chains_low_ebfmi = sum(ebfmi < 0.3),
+        across(c(ess_nowcast, ess_R, rhat_nowcast, rhat_R), 
+               function(x) paste(unique(unlist(x)), collapse = ",")),
         .groups = "drop"
-      )
+      ) %>% 
+      mutate(across(c(ess_nowcast, ess_R, rhat_nowcast, rhat_R),
+                    function(x) ifelse(x == "NA", "", x)))
 
     saveRDS(diags, diags_file)
     return(diags)
@@ -492,7 +493,7 @@ get_nowcasts <- function(results, maxDelay, reference_date = NULL,
         ))
       }
 
-      nowcast_file <- read_rds(res["result_file"])
+      nowcast_file <- read_rds(here::here(res["result_file"]))
       if (!("summary" %in% names(nowcast_file))) {
         return(data.frame(
           id = res["id"],
