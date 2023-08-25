@@ -67,7 +67,7 @@ make_nowcast_from_job <- function(job, index = NULL) {
     "impute_parametric_then_adjust"
   )
 
-  if (nowcast_job$model_def$model_type %in% imputation_models) {
+  if (job$model_def$model_type %in% imputation_models) {
     return(fit_impute_and_nowcast(
       job$data_def,
       job$model_def,

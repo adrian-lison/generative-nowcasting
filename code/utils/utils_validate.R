@@ -289,47 +289,49 @@ load_results_real <- function(res_list, maxDelay, reference_date,
     }
   })
 
-  # Get ground empirical ground truth (proxy)
-  ground_truth_emp <- get_ground_truth_empirical(
-    bind_rows(n_res_list, .id = "model") %>%
-      filter(R_model == "renewal", model %in% c("fully_generative")),
-    line_list_empirical, maxDelay,
-    consolidation_lags = consolidation_lags
-  )
-
-  # Run again with ground empirical truth and save
-  n_res_list <- lapply(res_list, function(res) {
-    gc()
-    all_results_path <- here::here(dirname(res$result_file[1]), "all_results.rds")
-    if (!overwrite & file.exists(all_results_path)) {
-      res_load <- readRDS(all_results_path)
-      if (any(grepl("_true", names(res_load)))) {
-        print(paste(all_results_path, "already exists with ground truth"))
-        return(res_load)
+  if (!is.null(line_list_empirical)) {
+    # Get ground empirical ground truth (proxy)
+    ground_truth_emp <- get_ground_truth_empirical(
+      bind_rows(n_res_list, .id = "model") %>%
+        filter(R_model == "renewal", model %in% c("fully_generative")),
+      line_list_empirical, maxDelay,
+      consolidation_lags = consolidation_lags
+    )
+    
+    # Run again with ground empirical truth and save
+    n_res_list <- lapply(res_list, function(res) {
+      gc()
+      all_results_path <- here::here(dirname(res$result_file[1]), "all_results.rds")
+      if (!overwrite & file.exists(all_results_path)) {
+        res_load <- readRDS(all_results_path)
+        if (any(grepl("_true", names(res_load)))) {
+          print(paste(all_results_path, "already exists with ground truth"))
+          return(res_load)
+        }
       }
-    }
-    ncres <- get_nowcasts(
-      res,
-      maxDelay,
-      reference_date,
-      keep_posterior = keep_posterior,
-      mc_cores = mc_cores,
-      ground_truth_emp = ground_truth_emp
-    )
-    saveRDS(ncres, all_results_path)
-    return(ncres)
-  })
-
-  # Add naive nowcasts
-  if (include_naive_nowcasts) {
-    naive_nc <- get_naive_nowcasts_empirical(
-      line_list_empirical, as.integer(max(n_res_list[[1]]$delay, na.rm = T))
-    )
-    n_res_list <- lapply(n_res_list, function(x) {
-      x %>% left_join(naive_nc, by = c("nowcast_date", "date" = "event1_date"))
+      ncres <- get_nowcasts(
+        res,
+        maxDelay,
+        reference_date,
+        keep_posterior = keep_posterior,
+        mc_cores = mc_cores,
+        ground_truth_emp = ground_truth_emp
+      )
+      saveRDS(ncres, all_results_path)
+      return(ncres)
     })
+    
+    # Add naive nowcasts
+    if (include_naive_nowcasts) {
+      naive_nc <- get_naive_nowcasts_empirical(
+        line_list_empirical, as.integer(max(n_res_list[[1]]$delay, na.rm = T))
+      )
+      n_res_list <- lapply(n_res_list, function(x) {
+        x %>% left_join(naive_nc, by = c("nowcast_date", "date" = "event1_date"))
+      })
+    }
   }
-
+  
   return(n_res_list)
 }
 
@@ -1655,4 +1657,662 @@ add_consistency <- function(nowcasts, slack = 2, R_slack = 0.1) {
   }
 
   return(nowcasts)
+}
+
+# Plotting
+
+# General performance plot across models, phases, for selected lags
+plot_performance_select <- function(m_res_list, outcome_name, models, metric, metric_name, delays_select) {
+  bind_rows(m_res_list, .id = "model") %>%
+    mutate(model = paste(model, R_model)) %>%
+    filter(model %in% models, nowcast_timing_list == paste0(delays_select, collapse = ",")) %>%
+    mutate(model = recode_factor(model, !!!model_names, .ordered = T)) %>%
+    select(dataset_index, model, phase, starts_with(outcome_name)) %>%
+    select(-contains("naive")) %>%
+    select(dataset_index, model, phase, contains(c("crps", "logS", "coverage", "MAE", "wis"))) %>%
+    pivot_longer(-c(dataset_index, model, phase)) %>%
+    mutate(outcome = str_extract(name, outcome_name), name = str_remove(name, paste0(outcome_name, "_"))) %>%
+    filter(name == metric, !is.na(value)) %>%
+    ggplot(aes(y = value, color = model)) +
+    geom_boxplot(outlier.shape = NA) +
+    facet_wrap(~phase, nrow = 1, scales = "fixed") +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      strip.background = element_rect(fill = NA),
+      axis.ticks.x = element_blank(),
+      axis.text.x = element_blank(),
+    ) +
+    ylab(metric_name) +
+    coord_cartesian(ylim = c(0, 0.5)) +
+    scale_x_continuous(breaks = NULL) +
+    scale_color_manual(
+      name = "Approach", values = model_colors[names(model_colors) %in% model_names[models]]
+    ) %>%
+    return()
+}
+
+
+#' WIS performance plot across models, phases, for selected lags
+plot_performance_wis_select <- function(m_res_list, outcome_name, models, delays_select) {
+  plotdat <- bind_rows(m_res_list, .id = "model") %>%
+    mutate(model = paste(model, R_model)) %>%
+    filter(
+      model %in% models,
+      nowcast_timing_list == paste0(delays_select, collapse = ",")
+    ) %>%
+    mutate(model = recode_factor(model, !!!model_names, .ordered = T)) %>%
+    select(dataset_index, model, phase, starts_with(outcome_name)) %>%
+    select(-contains("naive")) %>%
+    select(dataset_index, model, phase, contains(c("wis"))) %>%
+    pivot_longer(-c(dataset_index, model, phase)) %>%
+    mutate(
+      outcome = str_extract(name, outcome_name),
+      name = str_remove(name, paste0(outcome_name, "_"))
+    ) %>%
+    mutate(name = factor(name, ordered = T, levels = c(
+      "mean_wis", "mean_wis_over", "mean_wis_disp", "mean_wis_under"
+    )))
+  
+  plotdat %>%
+    filter(name != "mean_wis") %>%
+    group_by(model, phase, name) %>%
+    summarize(mean_value = mean(value), .groups = "keep") %>%
+    filter(!is.na(mean_value)) %>%
+    mutate(model_x = as.integer(model)) %>%
+    ggplot(aes(x = model_x)) +
+    geom_col_pattern(aes(y = mean_value, pattern_color = model, pattern = name),
+                     fill = "white", colour = "black", position = "stack"
+    ) +
+    facet_wrap(~phase, nrow = 1, scales = "free_y") +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      strip.background = element_rect(fill = NA),
+      axis.title.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.text.x = element_blank()
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, ifelse(FALSE, 0.5, 0.05)))
+    ) +
+    ylab(ifelse(outcome_name == "nowcast_all",
+                expression(bar(WIS)(hat(N)[t])),
+                expression(bar(WIS)(hat(R)[t]))
+    )) +
+    scale_pattern_discrete(choices = c("stripe", "circle", "crosshatch")) +
+    scale_pattern_color_manual(
+      name = "Approach",
+      values = model_colors[names(model_colors) %in% model_names[models]]
+    ) %>%
+    return()
+}
+
+plot_performance_wis_best <- function(m_res_list, outcome_name, models, delays_select) {
+  plotdat <- bind_rows(m_res_list, .id = "model") %>%
+    mutate(model = paste(model, R_model)) %>%
+    filter(
+      model %in% models,
+      nowcast_timing_list == paste0(delays_select, collapse = ",")
+    ) %>%
+    mutate(model = recode_factor(model, !!!model_names, .ordered = T)) %>%
+    select(dataset_index, model, phase, starts_with(outcome_name)) %>%
+    select(-contains("naive")) %>%
+    select(dataset_index, model, phase, contains(c("wis"))) %>%
+    pivot_longer(-c(dataset_index, model, phase)) %>%
+    mutate(
+      outcome = str_extract(name, outcome_name),
+      name = str_remove(name, paste0(outcome_name, "_"))
+    ) %>%
+    mutate(name = factor(name, ordered = T, levels = c(
+      "mean_wis", "mean_wis_over", "mean_wis_disp", "mean_wis_under"
+    )))
+  
+  best_percentage <- plotdat %>%
+    filter(name == "mean_wis") %>%
+    ungroup() %>%
+    group_by(dataset_index, phase) %>%
+    mutate(best = value == min(value, na.rm = T)) %>%
+    group_by(model, phase, name) %>%
+    summarize(
+      mean_value = mean(value, na.rm = T),
+      percent_best = sum(best, na.rm = T) / sum(!is.na(best)),
+      .groups = "keep"
+    ) %>%
+    group_by(phase, name) %>%
+    # normalize to account for double-counting
+    mutate(percent_best = round(100 * percent_best / sum(percent_best))) %>%
+    mutate(model_x = as.integer(model))
+  
+  best_percentage %>%
+    ggplot() +
+    geom_bar(aes(x = percent_best, y = 0, fill = forcats::fct_rev(model)),
+             alpha = 0.8,
+             orientation = "y",
+             position = "fill",
+             stat = "identity"
+    ) +
+    facet_wrap(~phase, nrow = 1, scales = "free_y") +
+    annotation_custom(
+      grid::textGrob(
+        label = "Percent best", gp = grid::gpar(fontsize = 9), vjust = 1.5
+      ),
+      xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = -Inf
+    ) +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      strip.background = element_rect(fill = NA),
+      axis.title.y = element_blank(),
+      axis.title.x = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.text.x = element_blank()
+    ) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0))) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0))) +
+    coord_cartesian(clip = "off") +
+    scale_fill_manual(
+      name = "Approach",
+      values = model_colors[names(model_colors) %in% model_names[models]]
+    ) %>%
+    return()
+}
+
+plot_validation_select <- function(dataset_id,
+                                   models,
+                                   R_models = c("renewal", "epiestim"),
+                                   feather_days,
+                                   feather_maxdelay,
+                                   feather_margin,
+                                   lags_list = list(
+                                     "Nowcasts in same week" = 0:6,
+                                     "Nowcasts one week after" = 7:13,
+                                     "Nowcasts two weeks after" = 14:20
+                                   ),
+                                   plot_type = "Cases",
+                                   performance_metric = "wis",
+                                   date_breaks = waiver(),
+                                   has_missing_onsets = NULL,
+                                   percent_best = T,
+                                   truth_data_index = 1,
+                                   categories_name = "Approach",
+                                   date_labels = "%b %d",
+                                   ground_truth_linetype = "solid",
+                                   legends.rel_widths = NULL,
+                                   legend_plot.rel_heights = c(1, 9.5)) {
+  intermediate_plots <- list()
+  
+  minimum_x <- reference_date + feather_days[1] - feather_maxdelay - 1
+  maximum_x <- reference_date + feather_days[1] + feather_margin
+  
+  if (is.null(legends.rel_widths)) {
+    if (performance_metric == "wis") {
+      legends.rel_widths <- c(0.5, 0.5)
+    } else if (has_missing_onsets & (plot_type != "R")) {
+      legends.rel_widths <- c(0.35, 0.45, 0.2)
+    } else {
+      legends.rel_widths <- c(0.25, 0.5, 0.25)
+    }
+  }
+  
+  
+  for (i in 1:length(lags_list)) {
+    # data preparation
+    
+    lags <- lags_list[[i]]
+    current_nowcast_dates <- phases %>%
+      filter(nowcast_timing_list == paste0(lags, collapse = ",")) %>%
+      distinct(nowcast_date) %>%
+      pull()
+    
+    
+    nowcast_data <- bind_rows(lapply(n_res_list[models], function(df) {
+      df %>%
+        filter(
+          dataset_index == dataset_id,
+          R_model %in% R_models,
+          nowcast_date %in% (current_nowcast_dates)
+        )
+    }), .id = "model") %>%
+      mutate(
+        model = paste(model, R_model),
+        group = paste(model, nowcast_date),
+        .after = model
+      )
+    
+    models_select <- unique(nowcast_data$model)
+    if (is.null(has_missing_onsets)) {
+      has_missing_onsets <- any(str_detect(models_select, "miss"))
+    }
+    
+    if ("nowcast_all_naive" %in% names(nowcast_data)) {
+      naive_nowcast_data <- nowcast_data %>%
+        distinct(nowcast_date, date, nowcast_all_naive)
+    }
+    
+    if (plot_type == "R") {
+      onset_legend <- R_legend
+    } else {
+      if (has_missing_onsets) {
+        naive_nowcast_known_data <- nowcast_data %>%
+          distinct(nowcast_date, date, nowcast_known_naive)
+        onset_legend <- symptom_onset_legend_with_missing
+      } else if ("nowcast_all_naive" %in% names(nowcast_data)) {
+        naive_nowcast_known_data <- naive_nowcast_data %>%
+          rename(nowcast_known_naive = nowcast_all_naive)
+        onset_legend <- symptom_onset_legend
+      } else {
+        onset_legend <- symptom_onset_legend # might want to change this
+      }
+    }
+    
+    truth_data <- n_res_list[[ifelse(is.null(truth_data_index), 1, truth_data_index)]] %>%
+      filter(dataset_index == dataset_id) %>%
+      group_by(date) %>%
+      summarize(across(ends_with("true"), first)) %>%
+      uncount(length(unique(nowcast_data$nowcast_date))) %>%
+      mutate(nowcast_date = rep(unique(nowcast_data$nowcast_date), length.out = n()))
+    
+    add_feather_date <- function(df) {
+      nowcast_date_renaming_feather <- setNames(
+        as.character(reference_date + feather_days),
+        as.character(current_nowcast_dates)
+      )
+      df <- df %>%
+        mutate(feather_date = as.Date(recode(
+          as.character(nowcast_date),
+          !!!nowcast_date_renaming_feather
+        )))
+      return(df)
+    }
+    
+    recode_for_plot <- function(df) {
+      nowcast_date_renaming_lag <- setNames(
+        names(feather_days),
+        as.character(current_nowcast_dates)
+      )
+      if ("model" %in% names(df)) {
+        df <- df %>%
+          mutate(model = recode_factor(model, !!!model_names, .ordered = T))
+      }
+      df <- df %>% mutate(
+        nowcast_date = recode_factor(as.character(nowcast_date),
+                                     !!!nowcast_date_renaming_lag,
+                                     .ordered = T
+        ),
+      )
+      return(df)
+    }
+    
+    nowcast_data_cases <- nowcast_data %>%
+      add_feather_date() %>%
+      filter(delay <= feather_maxdelay + lags[1] + 1) %>%
+      recode_for_plot()
+    if (exists("truth_data")) {
+      truth_data_cases <- truth_data %>%
+        add_feather_date() %>%
+        filter(
+          date <= feather_date + feather_margin,
+          date >= feather_date - feather_maxdelay
+        ) %>%
+        recode_for_plot()
+    }
+    if (exists("naive_nowcast_data")) {
+      naive_nowcast_data <- naive_nowcast_data %>%
+        add_feather_date() %>%
+        filter(date >= feather_date - feather_maxdelay) %>%
+        recode_for_plot()
+    }
+    if (exists("naive_nowcast_known_data")) {
+      naive_nowcast_known_data <- naive_nowcast_known_data %>%
+        add_feather_date() %>%
+        filter(date >= feather_date - feather_maxdelay) %>%
+        recode_for_plot()
+    }
+    
+    # plot nowcasts
+    if (plot_type == "Cases") {
+      minimum_y <- -1
+      maximum_y <- min(
+        max(nowcast_data_cases$nowcast_all.upper, na.rm = T),
+        max(c(0, truth_data_cases$nowcast_all_true, na.rm = T)) * 1.3,
+        na.rm = T
+      ) + 10
+      
+      PlotNowcast <- nowcast_data_cases %>%
+        {
+          ggplot(data = .) +
+            {
+              if (exists("naive_nowcast_data")) {
+                geom_col(
+                  data = naive_nowcast_data,
+                  aes(x = date, y = nowcast_all_naive),
+                  fill = "grey", alpha = 0.5, position = "identity"
+                )
+              }
+            } +
+            {
+              if (exists("naive_nowcast_known_data")) {
+                geom_col(
+                  data = naive_nowcast_known_data,
+                  aes(x = date, y = nowcast_known_naive),
+                  fill = "darkgrey", alpha = 0.5, position = "identity"
+                )
+              }
+            } +
+            geom_rect(
+              data = data.frame(
+                nowcast_date = forcats::fct_inorder(names(feather_days), ordered = T),
+                x = current_nowcast_dates
+              ),
+              aes(
+                xmax = x - lags[1], xmin = x - lags[length(lags)],
+                ymin = minimum_y, ymax = maximum_y
+              ),
+              fill = "#afafb6", alpha = 0.4
+            ) +
+            geom_ribbon(
+              aes(
+                x = date,
+                ymin = pmax(nowcast_all.lower, minimum_y),
+                ymax = pmin(nowcast_all.upper, maximum_y),
+                group = group,
+                fill = model
+              ),
+              linetype = "dotted", alpha = 0.2
+            ) +
+            {
+              if (exists("truth_data_cases")) {
+                geom_line(
+                  data = truth_data_cases,
+                  aes(x = date, y = pmin(nowcast_all_true, maximum_y)),
+                  color = ifelse(is.null(truth_data_index), NA, "black"),
+                  alpha = 0.6, linetype = ground_truth_linetype
+                )
+              }
+            } +
+            geom_line(
+              aes(
+                x = date,
+                y = ifelse(nowcast_all > maximum_y & lag(nowcast_all > maximum_y),
+                           NA, pmin(nowcast_all, maximum_y)
+                ),
+                group = group, color = model
+              ),
+              linewidth = 0.4
+            ) +
+            ylab(expression(Number ~ of ~ symptom ~ onsets ~ ~ N[t])) +
+            scale_x_date(
+              expand = c(0, 0),
+              date_labels = date_labels,
+              breaks = ~ max(.x) - seq(
+                7,
+                feather_maxdelay + lags_list[[length(lags_list)]][1],
+                by = 14
+              ),
+              date_breaks = date_breaks
+            ) +
+            scale_y_continuous(expand = expansion(add = c(0, 0))) +
+            coord_cartesian(
+              ylim = c(minimum_y, maximum_y), clip = "off"
+            ) +
+            facet_wrap(~nowcast_date, nrow = 1, scales = "free")
+        }
+    } else if (plot_type == "R") {
+      minimum_y <- 0
+      maximum_y <- 2.6
+      
+      PlotNowcast <- nowcast_data_cases %>%
+        {
+          ggplot(data = .) +
+            geom_hline(yintercept = 1, linetype = "dashed", color = "grey") +
+            geom_rect(
+              data = data.frame(
+                nowcast_date = forcats::fct_inorder(names(feather_days), ordered = T),
+                x = current_nowcast_dates
+              ),
+              aes(
+                xmax = x - lags[1],
+                xmin = x - lags[length(lags)],
+                ymin = 0, ymax = maximum_y
+              ),
+              fill = "#afafb6", alpha = 0.4
+            ) +
+            geom_ribbon(
+              aes(
+                x = date,
+                ymin = pmax(R.lower, minimum_y),
+                ymax = pmin(R.upper, maximum_y),
+                group = group, fill = model
+              ),
+              linetype = "dotted", alpha = 0.2
+            ) +
+            {
+              if (exists("truth_data_cases")) {
+                geom_line(
+                  data = truth_data_cases,
+                  aes(x = date, y = pmin(R_true, maximum_y)),
+                  color = ifelse(is.null(truth_data_index), NA, "black"),
+                  alpha = 0.6, linetype = ground_truth_linetype
+                )
+              }
+            } +
+            geom_line(
+              aes(
+                x = date,
+                y = ifelse(R > maximum_y, NA, R),
+                group = group, color = model
+              ),
+              linewidth = 0.4
+            ) +
+            ylab(expression(Effective ~ reproduction ~ number ~ ~ R[t])) +
+            scale_x_date(
+              expand = c(0, 0),
+              date_labels = date_labels,
+              breaks = ~ max(.x) - seq(
+                7,
+                feather_maxdelay +
+                  lags_list[[length(lags_list)]][1],
+                by = 14
+              ),
+              date_breaks = date_breaks
+            ) +
+            scale_y_continuous(expand = expansion(add = c(0, 0))) +
+            coord_cartesian(
+              ylim = c(minimum_y, maximum_y), clip = "off"
+            ) +
+            facet_wrap(~nowcast_date, nrow = 1, scales = "free")
+        }
+    } else {
+      stop("Unknown plot type.")
+    }
+    
+    nowcast_guide <- guide_legend(direction = "vertical")
+    
+    PlotNowcast <- PlotNowcast +
+      # this vertical line marks the nowcast date
+      geom_vline(
+        data = data.frame(
+          nowcast_date = forcats::fct_inorder(names(feather_days), ordered = T),
+          x = current_nowcast_dates
+        ),
+        aes(xintercept = x), linetype = "dotted", color = "darkgrey"
+      ) +
+      scale_color_manual(
+        name = categories_name,
+        values = model_colors[
+          names(model_colors) %in% model_names[models_select]
+        ]
+      ) +
+      scale_fill_manual(
+        name = categories_name,
+        values = model_colors[
+          names(model_colors) %in% model_names[models_select]
+        ]
+      ) +
+      theme_bw() +
+      theme(
+        legend.position = "top",
+        legend.background = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_rect(
+          fill = NA, color = "black", linewidth = 1
+        ),
+      ) +
+      ggtitle(names(lags_list)[[i]]) +
+      guides(color = nowcast_guide, fill = nowcast_guide)
+    
+    plotlegend <- cowplot::get_legend(PlotNowcast)
+    PlotNowcast <- PlotNowcast +
+      theme(
+        legend.position = "none",
+        plot.margin = unit(c(2, 2, 2, 2), "mm")
+      )
+    
+    # plot performance
+    if (is.null(performance_metric)) {
+      intermediate_plots[[i]] <- cowplot::plot_grid(
+        PlotNowcast,
+        ncol = 1, align = "v"
+      )
+    } else {
+      if (performance_metric == "crps") {
+        plotPerformance <- plot_performance_select(m_res_list,
+                                                   ifelse(plot_type == "Cases", "nowcast_all", "R"),
+                                                   models_select,
+                                                   ifelse(plot_type == "Cases", "mean_crps_scaled", "mean_wis"),
+                                                   ifelse(plot_type == "Cases",
+                                                          expression(bar(CRPS[scaled])(hat(N)[t])),
+                                                          expression(bar(CRPS)(hat(R)[t]))
+                                                   ),
+                                                   delays_select = lags
+        ) +
+          coord_cartesian(xlim = c(-0.4, 0.4), expand = FALSE)
+      } else if (performance_metric == "wis") {
+        plotPerformance <- plot_performance_wis_select(
+          m_res_list,
+          ifelse(plot_type == "Cases", "nowcast_all", "R"),
+          models_select,
+          delays_select = lags
+        )
+      } else {
+        stop(paste("Metric", performance_metric, "is not yet supported."))
+      }
+      
+      plotPerformance <- plotPerformance + theme(
+        strip.text = element_blank(),
+        strip.background = element_blank(),
+        plot.margin = unit(c(0, 2, 0.3, 2), "mm")
+      )
+      
+      if (performance_metric == "wis" && percent_best) {
+        plotPerformanceBest <- plot_performance_wis_best(
+          m_res_list,
+          ifelse(plot_type == "Cases", "nowcast_all", "R"),
+          models_select,
+          delays_select = lags
+        ) +
+          theme(
+            strip.text = element_blank(),
+            strip.background = element_blank(),
+            plot.margin = unit(c(0, 2, 4, 2), "mm")
+          )
+      }
+      
+      
+      # combine plots
+      g <- ggplotGrob(
+        ggplot() +
+          theme_void() +
+          annotate("polygon",
+                   x = c(0, 0.317, 0.5, 1),
+                   y = c(0, 1, 1, 0),
+                   fill = "#afafb6",
+                   alpha = 0.4
+          )
+      )
+      PlotNowcast <- PlotNowcast +
+        annotation_custom(
+          g,
+          xmin = -Inf,
+          xmax = Inf,
+          ymin = ifelse(plot_type == "Cases",
+                        -(maximum_y - minimum_y) / 6.5, -0.48
+          ),
+          ymax = 0
+        )
+      
+      if (performance_metric == "wis" && percent_best) {
+        intermediate_plots[[i]] <- cowplot::plot_grid(
+          PlotNowcast, plotPerformance, plotPerformanceBest,
+          ncol = 1, rel_heights = c(0.73, 0.22, 0.09), align = "v"
+        )
+      } else {
+        intermediate_plots[[i]] <- cowplot::plot_grid(
+          PlotNowcast, plotPerformance,
+          ncol = 1, rel_heights = c(0.75, 0.25), align = "v"
+        )
+      }
+    }
+  }
+  
+  if (is.null(performance_metric)) {
+    final_plot <- cowplot::plot_grid(
+      cowplot::plot_grid(NULL,
+                         cowplot::plot_grid(onset_legend,
+                                            plotlegend,
+                                            nrow = 1,
+                                            rel_widths = legends.rel_widths,
+                                            align = "h"
+                         ),
+                         NULL,
+                         nrow = 1, rel_widths = c(0.1, 0.8, 0.1)
+      ),
+      cowplot::plot_grid(
+        plotlist = intermediate_plots,
+        ncol = 1, labels = "AUTO"
+      ),
+      nrow = 2, rel_heights = legend_plot.rel_heights
+    )
+  } else if (performance_metric == "wis") {
+    final_plot <- cowplot::plot_grid(
+      cowplot::plot_grid(NULL,
+                         cowplot::plot_grid(onset_legend,
+                                            plotlegend,
+                                            pattern_legend,
+                                            nrow = 1,
+                                            rel_widths = legends.rel_widths,
+                                            align = "h"
+                         ),
+                         NULL,
+                         nrow = 1, rel_widths = c(0.1, 0.8, 0.1)
+      ),
+      cowplot::plot_grid(
+        plotlist = intermediate_plots,
+        ncol = 1, labels = "AUTO", align = "v"
+      ),
+      nrow = 2, rel_heights = legend_plot.rel_heights
+    )
+  } else {
+    final_plot <- cowplot::plot_grid(
+      cowplot::plot_grid(NULL,
+                         cowplot::plot_grid(onset_legend,
+                                            plotlegend,
+                                            nrow = 1,
+                                            rel_widths = legends.rel_widths,
+                                            align = "h"
+                         ),
+                         NULL,
+                         nrow = 1, rel_widths = c(0.1, 0.8, 0.1)
+      ),
+      cowplot::plot_grid(
+        plotlist = intermediate_plots,
+        ncol = 1, labels = "AUTO"
+      ),
+      nrow = 2, rel_heights = legend_plot.rel_heights
+    )
+  }
+  return(final_plot)
 }

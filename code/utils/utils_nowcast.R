@@ -48,7 +48,7 @@ make_nowcast <- function(data_def, model_def, prior_def, sampling_def,
     "generation_time_dist"
   )) {
     if (is.list(prior_def[[param]]) && length(prior_def[[param]]) >= n_dates) {
-      prior_def[[param]] <- prior_de[[param]][[date_index]]
+      prior_def[[param]] <- prior_def[[param]][[date_index]]
     }
   }
 
