@@ -4,7 +4,7 @@ The nowcasting models in this repository are based on the general framework desc
 
 The models in this repository have been developed further to account for cases with missing reference date and to integrate an underlying renewal process of infections. This allows to conduct missing data imputation, nowcasting and inference of transmission dynamics jointly in one model.
 
-➡️ See our [preprint](https://doi.org/10.48550/arXiv.2308.13262) for detailed model specifications and performance evaluation.
+➡️ See our [paper](https://doi.org/10.1371/journal.pcbi.1012021) for detailed model specifications and performance evaluation. The simulation and evaluation scripts for the study are available in a [separate repository](https://github.com/adrian-lison/generative-nowcasting-study). 
 
 Over time, the extensions developed here will (partly) also be implemented in the [epinowcast](https://github.com/epiforecasts/epinowcast) package. In the following, a list of the current features is provided.
 
